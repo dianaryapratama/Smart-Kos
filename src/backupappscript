@@ -1,0 +1,40 @@
+function doGet(e) {
+  if (e.parameter.hotspotData) {
+    var sheetId = '1nEAlE_VQuWwOkRY4WTpNNGwbSYZ6WiM2NzY601InRKE';
+    var sheet = SpreadsheetApp.openById(sheetId).getSheetByName('Hotspot');
+    var timestamp = new Date();
+
+    // ==========================================
+    // FITUR AUTO-CLEAN: Hapus Data Tiap Tanggal 1
+    // ==========================================
+    if (timestamp.getDate() === 1) {
+      var lastRow = sheet.getLastRow();
+      // Jika ada data selain header (baris 1), hapus semuanya
+      if (lastRow > 1) {
+        sheet.deleteRows(2, lastRow - 1);
+      }
+    }
+
+    var rawData = e.parameter.hotspotData; 
+    var records = rawData.split(',');
+    
+    for (var i = 0; i < records.length; i++) {
+      var details = records[i].split('|');
+      if (details.length === 3) {
+        var user = details[0];
+        var uploadBytes = parseFloat(details[1]) || 0;
+        var downloadBytes = parseFloat(details[2]) || 0;
+        
+        var uploadMB = (uploadBytes / 1048576).toFixed(2);
+        var downloadMB = (downloadBytes / 1048576).toFixed(2);
+        var totalMB = ((uploadBytes + downloadBytes) / 1048576).toFixed(2);
+        
+        if (totalMB >= 0) {
+           sheet.appendRow([timestamp, user, downloadMB, uploadMB, totalMB]);
+        }
+      }
+    }
+    return ContentService.createTextOutput("Data direkam. (Sistem Auto-Clean Aktif)");
+  }
+  return ContentService.createTextOutput("Tidak ada data.");
+}

@@ -1,0 +1,144 @@
+function doGet(e) {
+  if (e.parameter.hotspotData) {
+    var sheetId = '1nEAlE_VQuWwOkRY4WTpNNGwbSYZ6WiM2NzY601InRKE';
+    var sheet = SpreadsheetApp.openById(sheetId).getSheetByName('Hotspot');
+    var timestamp = new Date();
+    // ---------- Sheet FUP ----------
+const SHEET_NAME = 'FUP';
+const HEADERS = [
+  'ID', 'ISP', 'Paket', 'FUP_GB', 'Terpakai_GB', 'Auto_Sync',
+  'Periode_Mulai', 'Periode_Selesai', 'Catatan', 'Updated_At'
+];
+// =====================================================
+// FUP
+// =====================================================
+function toObject_(row) {
+  return {
+    ID: row[0],
+    ISP: row[1],
+    Paket: row[2],
+    FUP_GB: Number(row[3]) || 0,
+    Terpakai_GB: Number(row[4]) || 0,
+    Auto_Sync: String(row[5]).toLowerCase() === 'true' || String(row[5]) === '1' || String(row[5]).toLowerCase() === 'aktif',
+    Periode_Mulai: row[6] instanceof Date ? Utilities.formatDate(row[6], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(row[6] || ''),
+    Periode_Selesai: row[7] instanceof Date ? Utilities.formatDate(row[7], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(row[7] || ''),
+    Catatan: row[8] || '',
+    Updated_At: row[9] instanceof Date ? Utilities.formatDate(row[9], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss') : String(row[9] || '')
+  };
+}
+
+function getAll_() {
+  const sheet = getSheet_();
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sheet.getRange(2, 1, lastRow - 1, HEADERS.length).getValues();
+  return values.filter(row => String(row[0] || '') !== '').map(toObject_);
+}
+
+function findRow_(sheet, id) {
+  if (!id || sheet.getLastRow() < 2) return -1;
+  const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i += 1) {
+    if (String(ids[i][0]) === String(id)) return i + 2;
+  }
+  return -1;
+}
+
+function normalize_(data) {
+  return {
+    id: String(data.id || Utilities.getUuid()),
+    isp: String(data.isp || '').trim(),
+    packageName: String(data.packageName || '').trim(),
+    limitGB: Number(data.limitGB) || 0,
+    manualUsedGB: Math.max(0, Number(data.manualUsedGB) || 0),
+    isAutoSync: Boolean(data.isAutoSync),
+    periodStart: String(data.periodStart || '').trim(),
+    periodEnd: String(data.periodEnd || '').trim(),
+    notes: String(data.notes || '').trim()
+  };
+}
+
+function validate_(data) {
+  if (!data.isp) throw new Error('Nama ISP wajib diisi.');
+  if (!(data.limitGB > 0)) throw new Error('FUP_GB harus lebih besar dari 0.');
+  if (data.periodStart && data.periodEnd && data.periodStart > data.periodEnd) {
+    throw new Error('Periode mulai tidak boleh melewati periode selesai.');
+  }
+}
+
+function toRow_(item) {
+  return [
+    item.id, item.isp, item.packageName, item.limitGB, item.manualUsedGB,
+    item.isAutoSync, item.periodStart, item.periodEnd, item.notes, new Date()
+  ];
+}
+
+function create_(data) {
+  const sheet = getSheet_();
+  const item = normalize_(data);
+  validate_(item);
+  sheet.appendRow(toRow_(item));
+  return item;
+}
+
+function update_(id, data) {
+  const sheet = getSheet_();
+  const rowNumber = findRow_(sheet, id);
+  if (rowNumber < 2) throw new Error('Provider tidak ditemukan.');
+  const item = normalize_(Object.assign({}, data, { id }));
+  validate_(item);
+  sheet.getRange(rowNumber, 1, 1, HEADERS.length).setValues([toRow_(item)]);
+  return item;
+}
+
+function delete_(id) {
+  const sheet = getSheet_();
+  const rowNumber = findRow_(sheet, id);
+  if (rowNumber < 2) throw new Error('Provider tidak ditemukan.');
+  sheet.deleteRow(rowNumber);
+  return { id: String(id) };
+}
+
+    // ==========================================
+    // FITUR AUTO-CLEAN: Hapus Data Tiap Tanggal 1
+    // ==========================================
+    if (timestamp.getDate() === 1) {
+      var lastRow = sheet.getLastRow();
+      // Jika ada data selain header (baris 1), hapus semuanya
+      if (lastRow > 1) {
+        sheet.deleteRows(2, lastRow - 1);
+      }
+    }
+
+    var rawData = e.parameter.hotspotData; 
+    var records = rawData.split(',');
+    
+    for (var i = 0; i < records.length; i++) {
+      var details = records[i].split('|');
+      if (details.length === 3) {
+        var user = details[0];
+        var uploadBytes = parseFloat(details[1]) || 0;
+        var downloadBytes = parseFloat(details[2]) || 0;
+        
+        var uploadMB = (uploadBytes / 1048576).toFixed(2);
+        var downloadMB = (downloadBytes / 1048576).toFixed(2);
+        var totalMB = ((uploadBytes + downloadBytes) / 1048576).toFixed(2);
+        
+        if (totalMB >= 0) {
+           sheet.appendRow([timestamp, user, downloadMB, uploadMB, totalMB]);
+        }
+      }
+    }
+    // PERBAIKAN JSON: Mengembalikan response dalam format JSON yang valid
+    return ContentService.createTextOutput(JSON.stringify({
+      status: "success",
+      message: "Data direkam. (Sistem Auto-Clean Aktif)"
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  // PERBAIKAN JSON: Jika tidak ada data, kembalikan JSON error bukan teks biasa
+  return ContentService.createTextOutput(JSON.stringify({
+    status: "error",
+    message: "Tidak ada data."
+  })).setMimeType(ContentService.MimeType.JSON);
+}

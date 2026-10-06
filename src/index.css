@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  color-scheme: light dark;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar yang rapi & konsisten (termasuk scroll container tabel/grafik) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  background-clip: content-box;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+  background-clip: content-box;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+  background-clip: content-box;
+}
+* {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+.dark * {
+  scrollbar-color: #475569 transparent;
+}
+
+/* Grafik */
+.recharts-wrapper,
+.recharts-text {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.recharts-tooltip-wrapper {
+  outline: none;
+  z-index: 30;
+}
+.recharts-surface {
+  overflow: visible;
+}
+.recharts-cartesian-axis-tick-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cetak: pertahankan warna grafik & badge */
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+  .recharts-layer,
+  .recharts-wrapper {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

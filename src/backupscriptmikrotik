@@ -1,0 +1,30 @@
+:local allData "";
+
+# Mengambil data dari user dengan profil KOST-50 saja
+:foreach i in=[/ip hotspot user find profile="KOST-50"] do={
+    :local uName [/ip hotspot user get $i name];
+    :local bIn [/ip hotspot user get $i bytes-in];
+    :local bOut [/ip hotspot user get $i bytes-out];
+    
+    # Mencegah error jika pemakaian masih kosong
+    :if ([:len $bIn] = 0) do={:set bIn 0};
+    :if ([:len $bOut] = 0) do={:set bOut 0};
+    
+    # Format pengiriman: nama|upload|download
+    :local record "$uName|$bIn|$bOut";
+    
+    :if ([:len $allData] = 0) do={
+        :set allData $record;
+    } else={
+        :set allData "$allData,$record";
+    }
+}
+
+# Mengirim ke Google Webhook
+:local url "https://script.google.com/macros/s/AKfycbyqPrFZKU2U6ZmyYf29aaG6Q6Sr6kkUXd1dKqI8xkzhK2xy3wwOtAmXWNm9YOaCKleDqQ/exec?hotspotData=$allData";
+
+do {
+    /tool fetch url=$url mode=https keep-result=no;
+} on-error={
+    :log info "Data Hotspot Terkirim (Akumulatif - Tanpa Reset)";
+}
