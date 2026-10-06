@@ -1,16 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import {
   Wifi, Users, LogOut, Activity, TrendingUp, Download, Bot, AlertTriangle,
   Printer, Lock, Moon, Sun, Menu, X, Server, Plus, Edit, Trash2, Save,
-  BarChart2, PieChart as PieChartIcon, RefreshCw, Search
+  BarChart2, PieChart as PieChartIcon, RefreshCw, Search, Camera, ScanFace, Check,
+  ChevronDown, HelpCircle, Settings, Info
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, LineChart, Line, LabelList
 } from 'recharts';
+import {
+  loadFaceModels, openCamera, stopCamera, detectDescriptor,
+  matchFace, parseDescriptor, DESCRIPTOR_LENGTH
+} from './faceAuth';
+import Assistant from './Assistant';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#94a3b8'];
+
+const APP_NAME = 'Smart Kost';
+const softBox = 'bg-white dark:bg-slate-900 rounded-xl border border-slate-200/70 dark:border-slate-800';
+const ABOUT_TEXT = 'Smart Kost adalah dashboard manajemen jaringan internet (WiFi hotspot) untuk kost. Aplikasi ini memantau pemakaian data tiap kamar, mengelola batas FUP per ISP, menampilkan tren pemakaian harian, serta menyediakan akses aman melalui kata sandi dan login wajah. Dilengkapi Asisten AI berbasis Groq untuk menanya data dan analitik secara langsung.';
+const STACK = ['React 19', 'Vite', 'Tailwind CSS', 'Recharts', 'lucide-react', 'face-api.js', 'PapaParse', 'Groq AI (LLM & Whisper)', 'Google Sheets', 'Google Apps Script', 'Vercel'];
+const FAQS = [
+  { q: 'Dari mana data dashboard dimuat?', a: 'Data dibaca dari Google Sheets (publish ke CSV) dan diperbarui lewat Google Apps Script untuk aksi simpan, reset, dan wajah.' },
+  { q: 'Mengapa ada login wajah?', a: 'Untuk keamanan ekstra akses administrator. Wajah didaftarkan dari dashboard, lalu cocokkan saat login.' },
+  { q: 'Apa itu FUP?', a: 'Fair Usage Policy — batas pemakaian internet per ISP. Dashboard memperingatkan kamar yang mendekati batas.' },
+  { q: 'Bagaimana asisten AI bekerja?', a: 'Asisten memakai model Groq (gpt-oss-120b) untuk jawaban dan Whisper untuk transkripsi suara, dengan konteks analitik dashboard.' }
+];
 
 // --- GANTI DENGAN URL CSV ANDA ---
 const HOTSPOT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwYILZrPnVQUL19TMIDLnVbVcW_a0LTGxvvb2bJepITRGF5Ldk2joGEjHoJLULKTny63zrcB18r6Hp/pub?gid=123456&single=true&output=csv";
@@ -123,6 +140,37 @@ async function fupSend(body) {
   return json;
 }
 
+// Daftar tab yang boleh di-reset (Admin terkunci di sisi server)
+async function fupSheets() {
+  const res = await fetch(`${FUP_API_URL}?action=sheets`);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.message || 'Gagal memuat daftar data.');
+  return json.data;
+}
+
+// Daftar wajah terdaftar dari sheet Admin (kolom FaceDescriptor)
+async function fupFaces() {
+  const res = await fetch(`${FUP_API_URL}?action=faces&t=${Date.now()}`);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.message || 'Gagal memuat data wajah.');
+  return Array.isArray(json.data) ? json.data : [];
+}
+
+// Baris sheet -> kandidat pencocokan: hanya username dengan descriptor valid (128 angka)
+const faceCandidates = (rows) => rows
+  .map((row) => ({
+    username: String(row.username || '').trim(),
+    faceDescriptor: parseDescriptor(row.faceDescriptor)
+  }))
+  .filter((row) => row.username && row.faceDescriptor);
+
+// Nama file cadangan: reset_data_Hotspot_2026-10-06-14-30.csv
+const resetFileStamp = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+};
+
 const card = "bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm";
 const inputCls = "w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition";
 const tooltipStyle = (dark) => ({ backgroundColor: dark ? '#1e293b' : '#fff', borderRadius: '12px', border: 'none', color: dark ? '#e2e8f0' : '#0f172a' });
@@ -132,14 +180,16 @@ const TAB_TITLES = {
   'dashboard': 'Visualisasi Data',
   'ai-analysis': 'Laporan AI & Tabel',
   'fup-monitor': 'Sistem FUP ISP',
-  'rekap': 'Log Server Mentah'
+  'rekap': 'Log Server Mentah',
+  'reset': 'Reset Data'
 };
 
 const TAB_SUBTITLES = {
   'dashboard': 'Ringkasan trafik hotspot, distribusi beban & tren pemakaian',
   'ai-analysis': 'Rekap pemakaian harian per kamar, lengkap untuk export & cetak',
   'fup-monitor': 'Batas FUP tiap ISP, sisa kuota & pemakaian kumulatif',
-  'rekap': 'Seluruh baris mentah yang diambil dari server hotspot'
+  'rekap': 'Seluruh baris mentah yang diambil dari server hotspot',
+  'reset': 'Kosongkan data yang tidak diperlukan, tab Admin tetap tersimpan'
 };
 
 // ============ KOMPONEN UI DASAR (presentasi saja) ============
@@ -203,6 +253,8 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('kost50_dark');
@@ -215,6 +267,28 @@ function App() {
   const [fupError, setFupError] = useState('');
   const [fupForm, setFupForm] = useState(EMPTY_FUP);
   const [isEditingFup, setIsEditingFup] = useState(false);
+
+  const [resetSheets, setResetSheets] = useState([]);
+  const [resetTargets, setResetTargets] = useState([]);
+  const [resetBackup, setResetBackup] = useState(true);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetSaving, setResetSaving] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetNotice, setResetNotice] = useState('');
+
+  // Login & pendaftaran wajah
+  const [loginMode, setLoginMode] = useState('password');
+  const [faceBusy, setFaceBusy] = useState(false);
+  const [faceError, setFaceError] = useState('');
+  const [faceStatus, setFaceStatus] = useState('');
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [enrollBusy, setEnrollBusy] = useState(false);
+  const [enrollError, setEnrollError] = useState('');
+  const [enrollStatus, setEnrollStatus] = useState('');
+  const [enrollHasFace, setEnrollHasFace] = useState(false);
+  const [enrollDescriptor, setEnrollDescriptor] = useState(null);
+  const faceVideoRef = useRef(null);
+  const faceStreamRef = useRef(null);
 
   const today = new Date();
   const todayDate = today.getDate();
@@ -306,7 +380,186 @@ function App() {
     setCurrentUser('');
     setDataHotspot([]);
     setActiveTab('dashboard');
+    setLoginMode('password');
+    setFaceError('');
+    setFaceStatus('');
   };
+
+  // ================= LOGIN WAJAH & PENDAFTARAN =================
+  const stopFaceCamera = () => {
+    stopCamera(faceStreamRef.current);
+    faceStreamRef.current = null;
+    if (faceVideoRef.current) faceVideoRef.current.srcObject = null;
+  };
+
+  const startFaceCamera = async () => {
+    stopFaceCamera();
+    const video = faceVideoRef.current;
+    if (!video) throw new Error('Kamera tidak siap. Coba lagi.');
+    faceStreamRef.current = await openCamera(video);
+  };
+
+  // Deteksi berulang karena kamera & model butuh waktu siap
+  const waitForDescriptor = async (ms = 8000) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      const video = faceVideoRef.current;
+      if (video && video.readyState >= 2) {
+        const descriptor = await detectDescriptor(video);
+        if (descriptor) return descriptor;
+      }
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+    }
+    return null;
+  };
+
+  const faceMessage = (err) => {
+    const code = String(err && err.message ? err.message : err);
+    if (code === 'FACE_NOT_FOUND') return 'Wajah tidak terdeteksi. Posisikan wajah di tengah bingkai dengan cahaya yang cukup.';
+    if (code === 'NO_FACE_DATA') return 'Belum ada wajah terdaftar. Masuk dengan kata sandi lalu pilih "Daftarkan Wajah".';
+    if (code === 'NO_MATCH') return 'Wajah tidak cocok dengan data terdaftar. Gunakan kata sandi untuk masuk.';
+    if (/denied|not allowed|permission/i.test(code)) return 'Izin kamera ditolak. Izinkan akses kamera pada browser lalu coba lagi.';
+    if (/secure context|HTTPS/i.test(code)) return 'Kamera hanya dapat dibuka lewat HTTPS atau localhost.';
+    if (/tidak didukung/i.test(code)) return code;
+    return apiError(err instanceof Error ? err : new Error(code));
+  };
+
+  const handleSwitchLoginMode = (mode) => {
+    if (mode === loginMode) return;
+    stopFaceCamera();
+    setLoginMode(mode);
+    setFaceError('');
+    setFaceStatus('');
+    setLoginError('');
+  };
+
+  const handleFaceLogin = async () => {
+    if (faceBusy || lockRemaining > 0) return;
+    setFaceBusy(true);
+    setFaceError('');
+    setFaceStatus('Memuat model wajah...');
+    try {
+      await loadFaceModels();
+      setFaceStatus('Menyalakan kamera...');
+      await startFaceCamera();
+      setFaceStatus('Arahkan wajah ke kamera...');
+      const descriptor = await waitForDescriptor();
+      if (!descriptor) throw new Error('FACE_NOT_FOUND');
+      setFaceStatus('Mencocokkan wajah...');
+      const candidates = faceCandidates(await fupFaces());
+      if (candidates.length === 0) throw new Error('NO_FACE_DATA');
+      const match = matchFace(descriptor, candidates);
+      if (!match) throw new Error('NO_MATCH');
+      sessionStorage.setItem('kost50_user', match.username);
+      setCurrentUser(match.username);
+      setIsLoggedIn(true);
+      setFaceStatus('');
+    } catch (err) {
+      setFaceError(faceMessage(err));
+      setFaceStatus('');
+    } finally {
+      stopFaceCamera();
+      setFaceBusy(false);
+    }
+  };
+
+  const handleOpenEnroll = async () => {
+    setEnrollOpen(true);
+    setEnrollError('');
+    setEnrollStatus('Memeriksa data wajah...');
+    setEnrollBusy(true);
+    setEnrollDescriptor(null);
+    setEnrollHasFace(false);
+    try {
+      const mine = faceCandidates(await fupFaces()).filter((row) => row.username === currentUser);
+      setEnrollHasFace(mine.length > 0);
+      setEnrollStatus(mine.length > 0
+        ? 'Wajah sudah terdaftar untuk akun ini. Tekan Ambil Foto untuk mengganti.'
+        : 'Belum ada wajah untuk akun ini.');
+    } catch (err) {
+      setEnrollError(faceMessage(err));
+      setEnrollStatus('');
+    } finally {
+      setEnrollBusy(false);
+    }
+  };
+
+  const handleCloseEnroll = () => {
+    stopFaceCamera();
+    setEnrollOpen(false);
+    setEnrollDescriptor(null);
+    setEnrollError('');
+    setEnrollStatus('');
+  };
+
+  const handleCaptureFace = async () => {
+    if (enrollBusy) return;
+    setEnrollBusy(true);
+    setEnrollError('');
+    setEnrollStatus('Memuat model wajah...');
+    try {
+      await loadFaceModels();
+      setEnrollStatus('Menyalakan kamera...');
+      await startFaceCamera();
+      setEnrollStatus('Arahkan wajah ke kamera...');
+      const descriptor = await waitForDescriptor();
+      if (!descriptor) throw new Error('FACE_NOT_FOUND');
+      setEnrollDescriptor(descriptor);
+      setEnrollStatus('Wajah terdeteksi dan siap disimpan.');
+    } catch (err) {
+      setEnrollError(faceMessage(err));
+      setEnrollStatus('');
+      stopFaceCamera();
+    } finally {
+      setEnrollBusy(false);
+    }
+  };
+
+  const handleSaveFace = async () => {
+    if (enrollBusy) return;
+    if (!enrollDescriptor || enrollDescriptor.length !== DESCRIPTOR_LENGTH) {
+      setEnrollError('Data wajah belum lengkap. Tekan Ambil Foto terlebih dahulu.');
+      return;
+    }
+    setEnrollBusy(true);
+    setEnrollError('');
+    try {
+      await fupSend({ action: 'enrollFace', username: currentUser, descriptor: enrollDescriptor });
+      setEnrollHasFace(true);
+      setEnrollStatus('Wajah berhasil disimpan ke sheet Admin.');
+      stopFaceCamera();
+    } catch (err) {
+      setEnrollError(faceMessage(err));
+    } finally {
+      setEnrollBusy(false);
+    }
+  };
+
+  const handleDeleteFace = async () => {
+    if (enrollBusy) return;
+    setEnrollBusy(true);
+    setEnrollError('');
+    try {
+      await fupSend({ action: 'deleteFace', username: currentUser });
+      setEnrollHasFace(false);
+      setEnrollDescriptor(null);
+      setEnrollStatus('Data wajah dihapus. Gunakan kata sandi untuk masuk.');
+      stopFaceCamera();
+    } catch (err) {
+      setEnrollError(faceMessage(err));
+    } finally {
+      setEnrollBusy(false);
+    }
+  };
+
+  // Pastikan kamera benar-benar mati saat tab ditutup atau komponen dilepas
+  useEffect(() => {
+    const streamRef = faceStreamRef;
+    return () => {
+      stopCamera(streamRef.current);
+      streamRef.current = null;
+    };
+  }, []);
 
   // ================= FETCH DATA =================
   useEffect(() => {
@@ -378,12 +631,8 @@ function App() {
       .map(([name, v]) => ({ name, totalMB: parseFloat(v.toFixed(2)) }))
       .sort((a, b) => b.totalMB - a.totalMB);
 
-    let donut = bar.map(b => ({ name: b.name, value: b.totalMB }));
-    if (donut.length > 5) {
-      const top4 = donut.slice(0, 4);
-      top4.push({ name: 'Kamar Lainnya', value: donut.slice(4).reduce((s, i) => s + i.value, 0) });
-      donut = top4;
-    }
+    // Semua kamar tampil penuh di donut & leaderboard (tanpa penggabungan/pembatasan)
+    const donut = bar.map(b => ({ name: b.name, value: b.totalMB }));
 
     daily.sort((a, b) => b.ts - a.ts || a.Username.localeCompare(b.Username));
     return { aiDailyData: daily, networkTrendData: trend, donutChartData: donut, chartDataBar: bar };
@@ -401,7 +650,6 @@ function App() {
   const avgDailyMB = activeDays > 0 ? totalDailyMB / activeDays : 0;
   const peakDay = networkTrendData.reduce((max, i) => (!max || i.PemakaianHarian > max.PemakaianHarian ? i : max), null);
   const donutTotalMB = donutChartData.reduce((s, i) => s + i.value, 0) || 1;
-  const topRooms = chartDataBar.slice(0, 10);
 
   const filteredDaily = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -420,6 +668,34 @@ function App() {
     : worstPct >= 90 ? { label: 'Kritis', dot: 'bg-red-500' }
     : worstPct >= 75 ? { label: 'Waspada', dot: 'bg-amber-500' }
     : { label: 'Normal', dot: 'bg-emerald-500' };
+
+  // ===== Konteks analitik untuk Asisten AI (chat & suara) =====
+  const analyticsContext = (() => {
+    const top = chartDataBar.slice(0, 5).map(r => ({
+      name: r.name,
+      mb: parseFloat(r.totalMB.toFixed(2)),
+      gb: parseFloat((r.totalMB / 1024).toFixed(2))
+    }));
+    const worstFup = fupWithStats.reduce((m, i) => (i.pct > m.pct ? i : m), fupWithStats[0] || null);
+    return {
+      totalRooms: totalUsers,
+      totalMB: parseFloat(totalDataUsageMB.toFixed(2)),
+      totalGB: parseFloat(routerTotalGB.toFixed(2)),
+      avgMB: parseFloat(avgDataUsageMB.toFixed(2)),
+      avgGB: parseFloat((avgDataUsageMB / 1024).toFixed(2)),
+      uniqueUsers,
+      records: dataHotspot.length,
+      activeDays,
+      avgDailyMB: parseFloat(avgDailyMB.toFixed(2)),
+      avgDailyGB: parseFloat((avgDailyMB / 1024).toFixed(2)),
+      peakLabel: peakDay ? `${peakDay.Tanggal} (${formatDataSize(peakDay.PemakaianHarian)})` : null,
+      top,
+      fupCount: fupWithStats.length,
+      fupWorstPct: Math.round(worstFup ? worstFup.pct : 0),
+      fupWorstName: worstFup ? worstFup.isp : null,
+      ispStatus: ispStatus.label
+    };
+  })();
 
   const handleSaveFup = async (e) => {
     e.preventDefault();
@@ -479,6 +755,72 @@ function App() {
   };
   const cancelEdit = () => { setFupForm(EMPTY_FUP); setIsEditingFup(false); setFupError(''); };
 
+  // ================= RESET DATA =================
+  const loadResetSheets = () => {
+    setResetLoading(true);
+    setResetError('');
+    fupSheets()
+      .then(setResetSheets)
+      .catch(err => setResetError(apiError(err)))
+      .finally(() => setResetLoading(false));
+  };
+
+  const handleNavTab = (id) => {
+    setActiveTab(id);
+    setIsMobileOpen(false);
+    if (id === 'reset') loadResetSheets();
+  };
+
+  const toggleResetTarget = (name) => {
+    setResetNotice('');
+    setResetError('');
+    setResetTargets(list => (list.includes(name) ? list.filter(n => n !== name) : [...list, name]));
+  };
+
+  const handleResetBackup = () => {
+    const stamp = resetFileStamp();
+    if (resetTargets.includes('Hotspot') && dataHotspot.length > 0) {
+      downloadCSV(dataHotspot, `cadangan_Hotspot_${stamp}.csv`);
+    }
+    if (resetTargets.includes('FUP') && fupList.length > 0) {
+      downloadCSV(
+        fupList.map(i => ({
+          ID: i.id, ISP: i.isp, Paket: i.packageName, FUP_GB: i.limitGB,
+          Terpakai_GB: i.manualUsedGB, Auto_Sync: i.isAutoSync,
+          Periode_Mulai: i.periodStart, Periode_Selesai: i.periodEnd, Catatan: i.notes
+        })),
+        `cadangan_FUP_${stamp}.csv`
+      );
+    }
+  };
+
+  const handleResetData = async () => {
+    if (resetTargets.length === 0) {
+      setResetError('Pilih minimal satu data untuk dihapus.');
+      return;
+    }
+    const label = resetTargets.join(' dan ');
+    const warn = resetBackup
+      ? `Cadangan CSV akan diunduh terlebih dahulu.\n\nHapus semua baris data pada tab: ${label}?\nBaris header kolom tetap disimpan dan tab Admin tidak tersentuh.`
+      : `PERINGATAN: tidak ada cadangan.\n\nHapus PERMANEN semua baris data pada tab: ${label}?\nBaris header kolom tetap disimpan dan tab Admin tidak tersentuh.`;
+    if (!window.confirm(warn)) return;
+
+    setResetSaving(true);
+    setResetError('');
+    setResetNotice('');
+    try {
+      if (resetBackup) handleResetBackup();
+      const res = await fupSend({ action: 'reset', sheets: resetTargets });
+      setResetNotice(res.message);
+      setResetTargets([]);
+      setReloadKey(k => k + 1);
+    } catch (err) {
+      setResetError(apiError(err));
+    } finally {
+      setResetSaving(false);
+    }
+  };
+
   // ================= TAMPILAN LOGIN =================
   if (!isLoggedIn) {
     return (
@@ -489,9 +831,9 @@ function App() {
         <div className="relative max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl shadow-2xl p-7 sm:p-10 border border-slate-200 dark:border-slate-800">
           <div className="flex justify-between items-start mb-7">
             <div className="flex items-center gap-3">
-              <div className="bg-gradient-to-tr from-blue-600 to-indigo-500 p-3 rounded-2xl text-white shadow-lg shadow-blue-500/25"><Lock size={26} /></div>
+              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-12 w-12 rounded-2xl shadow-lg shadow-blue-500/25 shrink-0" />
               <div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white tracking-tight leading-none">Smart Kost 50</h1>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white tracking-tight leading-none">{APP_NAME}</h1>
                 <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mt-1.5 tracking-wide uppercase">Administrator Executive Panel</p>
               </div>
             </div>
@@ -506,6 +848,18 @@ function App() {
             </div>
           )}
 
+          <div role="tablist" aria-label="Metode login" className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl mb-5">
+            <button type="button" role="tab" aria-selected={loginMode === 'password'} onClick={() => handleSwitchLoginMode('password')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-colors ${loginMode === 'password' ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
+              <Lock size={15} /> Kata Sandi
+            </button>
+            <button type="button" role="tab" aria-selected={loginMode === 'face'} onClick={() => handleSwitchLoginMode('face')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-colors ${loginMode === 'face' ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
+              <ScanFace size={15} /> Wajah
+            </button>
+          </div>
+
+          {loginMode === 'password' ? (
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label htmlFor="username" className="block text-xs font-bold text-slate-600 dark:text-slate-300 mb-2 uppercase tracking-wider">Username</label>
@@ -520,18 +874,56 @@ function App() {
               {isLoggingIn ? 'Memverifikasi...' : lockRemaining > 0 ? `Terkunci - coba lagi ${lockRemaining} detik` : 'Login Dashboard'}
             </button>
           </form>
+          ) : (
+          <div className="space-y-4">
+            <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-[4/3]">
+              <video ref={faceVideoRef} autoPlay playsInline muted style={{ transform: 'scaleX(-1)' }} className="h-full w-full object-cover" />
+              {!faceBusy && !faceStatus && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs text-center px-5">
+                  <Camera size={26} className="text-slate-500" />
+                  <span>Kamera sedang mati. Tekan tombol di bawah untuk mulai memindai wajah.</span>
+                </div>
+              )}
+              {faceStatus && (
+                <div className="absolute inset-x-0 bottom-0 bg-slate-950/85 text-slate-100 text-xs font-semibold px-3 py-2.5 flex items-center gap-2">
+                  <Activity size={14} className="animate-pulse shrink-0" />
+                  <span className="truncate">{faceStatus}</span>
+                </div>
+              )}
+            </div>
+
+            {faceError && (
+              <div role="alert" className="bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 p-3 rounded-xl text-xs font-medium border border-red-100 dark:border-red-900/50 flex items-start gap-2">
+                <AlertTriangle size={15} className="shrink-0 mt-0.5" /> <span>{faceError}</span>
+              </div>
+            )}
+
+            <button type="button" onClick={handleFaceLogin} disabled={faceBusy || lockRemaining > 0}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-semibold py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-600/25 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed text-sm">
+              {faceBusy ? <Activity className="animate-spin" size={18} /> : lockRemaining > 0 ? <Lock size={16} /> : <ScanFace size={18} />}
+              {faceBusy ? 'Memverifikasi...' : lockRemaining > 0 ? `Terkunci - coba lagi ${lockRemaining} detik` : 'Verifikasi Wajah'}
+            </button>
+
+            <p className="text-[11px] text-center text-slate-400 dark:text-slate-500 leading-relaxed">
+              Wajah harus sudah didaftarkan dari dashboard. Belum punya? Masuk lewat kata sandi lalu pilih menu "Daftarkan Wajah".
+            </p>
+          </div>
+          )}
 
           <p className="mt-6 text-[11px] text-center text-slate-400 dark:text-slate-500 leading-relaxed">
             Akses terbatas untuk administrator. Percobaan gagal maksimal {MAX_ATTEMPTS} kali sebelum terkunci {LOCK_SECONDS} detik.
           </p>
         </div>
+        <p className="mt-4 text-[10px] text-center text-slate-400 dark:text-slate-500 print:hidden">
+          &copy; 2026 Dian Arya Pratama &middot; {APP_NAME}
+        </p>
       </div>
     );
   }
 
   // ================= TAMPILAN DASHBOARD =================
   const navItem = (id, Icon, label, activeCls) => (
-    <button onClick={() => { setActiveTab(id); setIsMobileOpen(false); }}
+    <button onClick={() => handleNavTab(id)}
       aria-current={activeTab === id ? 'page' : undefined}
       className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all border-l-4 ${activeTab === id ? `${activeCls} border-current shadow-sm` : 'border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200'}`}>
       <Icon size={18} className="shrink-0" />
@@ -549,11 +941,11 @@ function App() {
       {/* SIDEBAR */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shadow-2xl md:shadow-none transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 md:w-64 xl:w-72 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} print:hidden`}>
         <div className="h-20 flex items-center justify-between px-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
-          <div className="flex items-center min-w-0">
-            <div className="bg-gradient-to-tr from-blue-600 to-indigo-500 p-2.5 rounded-xl text-white mr-3 shadow-lg shadow-blue-600/25 shrink-0"><Wifi size={20} /></div>
+          <div className="flex items-center min-w-0 gap-3">
+            <img src="/favicon.svg" alt="Logo Smart Kost" className="h-10 w-10 rounded-xl shadow-lg shadow-blue-600/25 shrink-0" />
             <div className="min-w-0">
-              <p className="text-lg font-extrabold tracking-tight leading-none truncate">KOST 50</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mt-1">Network Console</p>
+              <p className="text-lg font-extrabold tracking-tight leading-none truncate">{APP_NAME}</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mt-1.5">Network Console</p>
             </div>
           </div>
           <button aria-label="Tutup menu" className="md:hidden text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 p-1" onClick={() => setIsMobileOpen(false)}><X size={22} /></button>
@@ -566,6 +958,7 @@ function App() {
             {navItem('ai-analysis', Bot, 'Laporan AI & Tabel', 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300')}
             {navItem('fup-monitor', Server, 'Sistem FUP ISP', 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300')}
             {navItem('rekap', Activity, 'Log Server Mentah', 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-white')}
+            {navItem('reset', Trash2, 'Reset Data', 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300')}
           </nav>
 
           <div className="mt-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-3.5">
@@ -593,6 +986,9 @@ function App() {
               <p className="text-[10px] uppercase tracking-wider text-slate-400">Administrator</p>
             </div>
           </div>
+          <button onClick={handleOpenEnroll} className="flex items-center gap-3 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 px-3.5 py-2.5 w-full rounded-xl transition-colors font-semibold text-sm mb-1">
+            <Camera size={18} /><span>Daftarkan Wajah</span>
+          </button>
           <button onClick={handleLogout} className="flex items-center gap-3 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 px-3.5 py-2.5 w-full rounded-xl transition-colors font-semibold text-sm">
             <LogOut size={18} /><span>Logout Secure</span>
           </button>
@@ -609,7 +1005,7 @@ function App() {
           </div>
         )}
 
-        <header className="h-auto md:h-20 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 md:px-8 py-3 md:py-0 flex justify-between items-center gap-3 shrink-0 print:hidden transition-colors duration-300">
+        <header className="relative z-30 h-auto md:h-20 bg-white/90 dark:bg-slate-900/90 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 md:px-8 py-3 md:py-0 flex justify-between items-center gap-3 shrink-0 print:hidden transition-colors duration-300">
           <div className="flex items-center gap-3 min-w-0">
             <button aria-label="Buka menu" className="md:hidden p-2 -ml-2 text-slate-600 dark:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => setIsMobileOpen(true)}><Menu size={22} /></button>
             <div className="min-w-0">
@@ -617,7 +1013,7 @@ function App() {
               <p className="hidden sm:block text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">{TAB_SUBTITLES[activeTab]}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
             <span className="hidden lg:inline-flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-full">
               <span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : fetchError ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
               {loading ? 'Memuat...' : fetchError ? 'Gagal memuat' : `${dataHotspot.length} record`}
@@ -628,11 +1024,52 @@ function App() {
             <button aria-label="Ganti tema" onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-slate-600 dark:text-slate-300">
               {darkMode ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <div title={currentUser} className="hidden sm:flex h-10 pl-1 pr-3 items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full shadow-sm">
-              <span className="h-8 w-8 bg-gradient-to-tr from-blue-600 to-indigo-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">
-                {currentUser.charAt(0).toUpperCase()}
-              </span>
-              <span className="text-xs font-bold text-slate-600 dark:text-slate-300 max-w-[90px] truncate">{currentUser}</span>
+            <div className="relative hidden sm:block">
+              <button type="button" onClick={() => setProfileOpen(p => !p)} aria-haspopup="menu" aria-expanded={profileOpen}
+                title={currentUser}
+                className="flex h-10 pl-1 pr-2.5 items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-colors">
+                <span className="h-8 w-8 bg-gradient-to-tr from-blue-600 to-indigo-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">
+                  {currentUser.charAt(0).toUpperCase()}
+                </span>
+                <span className="text-xs font-bold text-slate-600 dark:text-slate-300 max-w-[90px] truncate">{currentUser}</span>
+                <ChevronDown size={15} className={`text-slate-400 shrink-0 transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {profileOpen && (
+                <>
+                  <div className="fixed inset-0 z-40 print:hidden" onClick={() => setProfileOpen(false)} aria-hidden="true" />
+                  <div role="menu" aria-label="Menu profil" className="absolute right-0 top-full mt-2 z-50 w-64 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 shadow-2xl overflow-hidden print:hidden">
+                    <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+                      <span className="h-9 w-9 bg-gradient-to-tr from-blue-600 to-indigo-500 text-white rounded-full flex items-center justify-center font-bold text-sm shrink-0">
+                        {currentUser.charAt(0).toUpperCase()}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold truncate text-slate-800 dark:text-white">{currentUser}</p>
+                        <p className="text-[10px] uppercase tracking-wider text-slate-400">Administrator</p>
+                      </div>
+                    </div>
+                    <div className="p-1.5">
+                      <button role="menuitem" type="button" onClick={() => { setProfileOpen(false); setAboutOpen(true); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                        <HelpCircle size={17} /> FAQ &amp; Tentang
+                      </button>
+                      <button role="menuitem" type="button" disabled
+                        title="Coming soon"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-400 cursor-not-allowed opacity-70">
+                        <Settings size={17} /> Pengaturan
+                        <span className="ml-auto text-[9px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-full">Coming Soon</span>
+                      </button>
+                      <button role="menuitem" type="button" onClick={handleLogout}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+                        <LogOut size={17} /> Logout Secure
+                      </button>
+                    </div>
+                    <div className="px-4 py-2.5 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-400 dark:text-slate-400">
+                      &copy; 2026 Dian Arya Pratama &middot; {APP_NAME}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
@@ -667,10 +1104,10 @@ function App() {
                   {/* ===== KARTU RINGKASAN ===== */}
                   <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-5">
                     {[
-                      { label: 'Kamar Aktif', value: totalUsers, sub: `${uniqueUsers} username unik Â· ${dataHotspot.length} record log`, Icon: Users, cls: 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400', bar: 'bg-blue-500' },
-                      { label: 'Trafik Kumulatif', value: formatDataSize(totalDataUsageMB), sub: `â‰ˆ ${routerTotalGB.toFixed(2)} GB tercatat bulan ini`, Icon: TrendingUp, cls: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400', bar: 'bg-emerald-500' },
+                      { label: 'Kamar Aktif', value: totalUsers, sub: `${uniqueUsers} username unik · ${dataHotspot.length} record log`, Icon: Users, cls: 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400', bar: 'bg-blue-500' },
+                      { label: 'Trafik Kumulatif', value: formatDataSize(totalDataUsageMB), sub: `${routerTotalGB.toFixed(2)} GB tercatat bulan ini`, Icon: TrendingUp, cls: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400', bar: 'bg-emerald-500' },
                       { label: 'Rata-rata / Kamar', value: formatDataSize(avgDataUsageMB), sub: `Total harian ${formatDataSize(totalDailyMB)}`, Icon: Activity, cls: 'bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400', bar: 'bg-amber-500' },
-                      { label: 'Status ISP', value: ispStatus.label, sub: `${fupWithStats.length} ISP dipantau Â· pemakaian terburuk ${worstPct.toFixed(0)}%`, Icon: Server, cls: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400', bar: 'bg-indigo-500', status: true }
+                      { label: 'Status ISP', value: ispStatus.label, sub: `${fupWithStats.length} ISP dipantau · pemakaian terburuk ${worstPct.toFixed(0)}%`, Icon: Server, cls: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400', bar: 'bg-indigo-500', status: true }
                     ].map(k => (
                       <div key={k.label} className={`${card} p-4 sm:p-5 relative overflow-hidden hover:shadow-md transition-shadow`}>
                         <div className="flex items-start justify-between gap-2">
@@ -726,17 +1163,17 @@ function App() {
                           </div>
                         </div>
 
-                        <div className={`${card} p-4 sm:p-6 min-w-0`}>
+                        <div className={`${card} p-4 sm:p-6 min-w-0 flex flex-col`}>
                           <SectionHeader
                             Icon={PieChartIcon} iconCls="text-emerald-500"
                             title="Distribusi Beban"
-                            subtitle="Proporsi pemakaian tiap kamar terhadap total"
-                            right={<Pill tone="emerald">{donutChartData.length} segmen</Pill>}
+                            subtitle="Seluruh kamar, proporsinya terhadap total pemakaian"
+                            right={<Pill tone="emerald">{donutChartData.length} kamar</Pill>}
                           />
-                          <div className="relative h-44 sm:h-52 w-full">
+                          <div className="relative h-44 sm:h-52 w-full shrink-0">
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart>
-                                <Pie data={donutChartData} cx="50%" cy="50%" innerRadius={56} outerRadius={80} paddingAngle={3} dataKey="value" stroke="none">
+                                <Pie data={donutChartData} cx="50%" cy="50%" innerRadius={56} outerRadius={80} paddingAngle={donutChartData.length > 12 ? 1 : 3} dataKey="value" stroke="none">
                                   {donutChartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                                 </Pie>
                                 <RechartsTooltip formatter={(v, n) => [formatDataSize(v), n]} contentStyle={tooltipStyle(darkMode)} />
@@ -747,7 +1184,7 @@ function App() {
                               <span className="text-sm font-extrabold text-slate-800 dark:text-white">{formatDataSize(totalDataUsageMB)}</span>
                             </div>
                           </div>
-                          <ul className="mt-4 space-y-1.5">
+                          <ul className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
                             {donutChartData.map((d, i) => (
                               <li key={d.name} className="flex items-center gap-2 text-xs">
                                 <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></span>
@@ -762,29 +1199,28 @@ function App() {
 
                       {/* ===== BARIS 2: LEADERBOARD + TREN HARIAN ===== */}
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
-                        <div className={`${card} p-4 sm:p-6 min-w-0`}>
+                        <div className={`${card} p-4 sm:p-6 min-w-0 flex flex-col`}>
                           <SectionHeader
                             Icon={BarChart2} iconCls="text-blue-500"
                             title="Leaderboard Kamar"
-                            subtitle="Peringkat konsumsi data kumulatif per kamar"
-                            right={<Pill tone="blue">Top {topRooms.length} dari {totalUsers}</Pill>}
+                            subtitle="Peringkat konsumsi data kumulatif, seluruh kamar"
+                            right={<Pill tone="blue">{totalUsers} kamar</Pill>}
                           />
-                          <div className="w-full" style={{ height: Math.max(240, topRooms.length * 34 + 24) }}>
-                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart data={topRooms} layout="vertical" margin={{ top: 4, right: 66, left: 4, bottom: 0 }}>
-                                <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke={gridStroke} />
-                                <XAxis type="number" tickFormatter={formatDataSize} tick={axisTick} axisLine={false} tickLine={false} />
-                                <YAxis type="category" dataKey="name" width={96} tick={{ ...axisTick, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
-                                <RechartsTooltip cursor={{ fill: darkMode ? '#1e293b22' : '#f1f5f9' }} formatter={(v, n) => [formatDataSize(v), n]} labelFormatter={(l) => `Kamar ${l}`} contentStyle={tooltipStyle(darkMode)} />
-                                <Bar dataKey="totalMB" name="Total Data" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={16} background={{ fill: darkMode ? '#1e293b' : '#f1f5f9', radius: [0, 6, 6, 0] }}>
-                                  <LabelList content={BarValueLabel} />
-                                </Bar>
-                              </BarChart>
-                            </ResponsiveContainer>
+                          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col pr-1">
+                            <div className="w-full" style={{ height: Math.max(240, chartDataBar.length * 34 + 24), margin: 'auto' }}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={chartDataBar} layout="vertical" margin={{ top: 4, right: 66, left: 4, bottom: 0 }}>
+                                  <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke={gridStroke} />
+                                  <XAxis type="number" tickFormatter={formatDataSize} tick={axisTick} axisLine={false} tickLine={false} />
+                                  <YAxis type="category" dataKey="name" width={96} tick={{ ...axisTick, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
+                                  <RechartsTooltip cursor={{ fill: darkMode ? '#1e293b22' : '#f1f5f9' }} formatter={(v, n) => [formatDataSize(v), n]} labelFormatter={(l) => `Kamar ${l}`} contentStyle={tooltipStyle(darkMode)} />
+                                  <Bar dataKey="totalMB" name="Total Data" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={16} background={{ fill: darkMode ? '#1e293b' : '#f1f5f9', radius: [0, 6, 6, 0] }}>
+                                    <LabelList content={BarValueLabel} />
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
                           </div>
-                          {chartDataBar.length > 10 && (
-                            <p className="mt-3 text-[11px] text-slate-400">Menampilkan 10 teratas dari {chartDataBar.length} kamar. Lihat tab Laporan untuk data lengkap.</p>
-                          )}
                         </div>
 
                         <div className={`${card} p-4 sm:p-6 min-w-0`}>
@@ -1133,9 +1569,271 @@ function App() {
                   </div>
                 </div>
               )}
+
+              {/* RESET DATA */}
+              {activeTab === 'reset' && (
+                <div className="space-y-4 md:space-y-5">
+                  <div className={`${card} p-5 md:p-6 border-red-200 dark:border-red-900/60`}>
+                    <div className="flex items-start gap-3">
+                      <div className="h-11 w-11 rounded-2xl bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                        <AlertTriangle size={22} />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="text-base sm:text-lg font-bold text-slate-800 dark:text-white">Hapus Data Sementara</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                          Kosongkan data yang sudah tidak diperlukan, misalnya setelah tutup bulan. Baris judul kolom tetap disimpan,
+                          dan tab <strong className="text-slate-700 dark:text-slate-200">Admin</strong> selalu terkunci.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 space-y-2.5">
+                      {resetLoading ? (
+                        <div className="py-6 text-center text-sm text-slate-500 flex items-center justify-center gap-2">
+                          <RefreshCw size={16} className="animate-spin" /> Memuat daftar data...
+                        </div>
+                      ) : resetSheets.length === 0 ? (
+                        <div className="py-6 text-center text-sm text-slate-500">Daftar data tidak tersedia.</div>
+                      ) : resetSheets.map(sheet => (
+                        <label
+                          key={sheet.name}
+                          className={`flex items-center gap-3.5 p-4 rounded-2xl border transition-colors ${
+                            sheet.protected
+                              ? 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 cursor-not-allowed opacity-70'
+                              : 'border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-900 cursor-pointer'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 rounded-md accent-red-600 shrink-0 disabled:cursor-not-allowed"
+                            checked={resetTargets.includes(sheet.name)}
+                            disabled={sheet.protected || resetSaving}
+                            onChange={() => toggleResetTarget(sheet.name)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="font-bold text-sm text-slate-800 dark:text-white flex items-center gap-2">
+                              {sheet.name}
+                              {sheet.protected && <Pill tone="slate"><Lock size={11} /> Terkunci</Pill>}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                              {sheet.protected
+                                ? (sheet.note || 'Data ini terkunci dan tidak dapat dihapus.')
+                                : `${sheet.dataRows} baris data siap dihapus.`}
+                            </p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+
+                    <label className="mt-4 flex items-start gap-3 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-950/20 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-5 w-5 rounded-md accent-emerald-600 shrink-0 mt-0.5 disabled:cursor-not-allowed"
+                        checked={resetBackup}
+                        disabled={resetSaving}
+                        onChange={(e) => setResetBackup(e.target.checked)}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm text-slate-800 dark:text-white">Unduh cadangan CSV sebelum menghapus</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                          Disarankan. Browser akan mengunduh data yang terpilih sebagai file CSV sebelum dihapus, jadi masih bisa dipulihkan bila keliru memilih.
+                        </p>
+                      </div>
+                    </label>
+
+                    {resetError && (
+                      <div role="alert" className="mt-4 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 p-3 rounded-xl text-sm font-medium border border-red-100 dark:border-red-900/50 flex items-start gap-2">
+                        <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                        <span>
+                          {resetError}
+                          {/tidak dikenali/i.test(resetError) && (
+                            <span className="block mt-1.5 font-normal text-xs leading-relaxed opacity-90">
+                              Backend di Google Apps Script belum mendukung fitur reset. Buka editor Apps Script &gt; Deploy &gt;
+                              Manage deployments &gt; edit &gt; New version &gt; Deploy, lalu muat ulang dashboard (Ctrl+F5).
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {resetNotice && (
+                      <div role="status" className="mt-4 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 p-3 rounded-xl text-sm font-medium border border-emerald-100 dark:border-emerald-900/50 flex items-start gap-2">
+                        <Wifi size={16} className="shrink-0 mt-0.5" /> <span>{resetNotice}</span>
+                      </div>
+                    )}
+
+                    <div className="mt-5 flex flex-wrap gap-2.5">
+                      <button
+                        onClick={handleResetData}
+                        disabled={resetSaving || resetLoading || resetTargets.length === 0}
+                        className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold px-5 py-3 rounded-xl text-sm shadow-lg shadow-red-600/25 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none transition-all"
+                      >
+                        {resetSaving ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                        {resetSaving ? 'Menghapus...' : `Hapus ${resetTargets.length > 0 ? `${resetTargets.length} Data Terpilih` : 'Data Terpilih'}`}
+                      </button>
+                      {resetBackup && (
+                        <button
+                          onClick={handleResetBackup}
+                          disabled={resetSaving || resetTargets.length === 0}
+                          className="flex items-center gap-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 px-5 py-3 rounded-xl text-sm font-bold shadow-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+                        >
+                          <Download size={16} /> Unduh Cadangan Saja
+                        </button>
+                      )}
+                      {resetTargets.length > 0 && !resetSaving && (
+                        <button
+                          onClick={() => { setResetTargets([]); setResetError(''); setResetNotice(''); }}
+                          className="px-5 py-3 rounded-xl text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          Batalkan Pilihan
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
+
+          <footer className="mt-8 pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-center gap-1.5 text-center text-[11px] text-slate-400 dark:text-slate-500 print:hidden">
+            <span>&copy; 2026 <span className="font-semibold text-slate-500 dark:text-slate-400">Dian Arya Pratama</span> &middot; {APP_NAME}</span>
+            <span className="hidden sm:inline text-slate-300 dark:text-slate-600">|</span>
+            <span>Dibuat dengan React, Vite, Groq AI &amp; Google Sheets</span>
+          </footer>
         </main>
+
+        {/* MODAL PENDAFTARAN WAJAH */}
+        {enrollOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 print:hidden">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleCloseEnroll} aria-hidden="true" />
+            <div role="dialog" aria-modal="true" aria-label="Daftarkan Wajah" className={`relative w-full max-w-md ${card} p-5 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto`}>
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="bg-gradient-to-tr from-indigo-600 to-violet-500 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-500/25 shrink-0"><Camera size={18} /></div>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-extrabold text-slate-800 dark:text-white truncate">Daftarkan Wajah</h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">Akun {currentUser} &middot; kolom FaceDescriptor di sheet Admin</p>
+                  </div>
+                </div>
+                <button onClick={handleCloseEnroll} aria-label="Tutup" className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 shrink-0"><X size={18} /></button>
+              </div>
+
+              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-[4/3] mb-4">
+                <video ref={faceVideoRef} autoPlay playsInline muted style={{ transform: 'scaleX(-1)' }} className="h-full w-full object-cover" />
+                {!enrollBusy && !enrollStatus && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400 text-xs text-center px-5">
+                    <ScanFace size={26} className="text-slate-500" />
+                    <span>Tekan &quot;Ambil Foto&quot; untuk mengambil template wajah.</span>
+                  </div>
+                )}
+                {enrollStatus && (
+                  <div className="absolute inset-x-0 bottom-0 bg-slate-950/85 text-slate-100 text-xs font-semibold px-3 py-2.5 flex items-center gap-2">
+                    <Activity size={14} className="animate-pulse shrink-0" />
+                    <span className="truncate">{enrollStatus}</span>
+                  </div>
+                )}
+                {enrollDescriptor && (
+                  <div className="absolute top-2 right-2 bg-emerald-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1 shadow">
+                    <Check size={12} /> Siap disimpan
+                  </div>
+                )}
+              </div>
+
+              {enrollError && (
+                <div role="alert" className="mb-4 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 p-3 rounded-xl text-xs font-medium border border-red-100 dark:border-red-900/50 flex items-start gap-2">
+                  <AlertTriangle size={15} className="shrink-0 mt-0.5" /> <span>{enrollError}</span>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2.5">
+                <button onClick={handleCaptureFace} disabled={enrollBusy}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold px-4 py-3 rounded-xl text-sm shadow-lg shadow-indigo-600/25 disabled:opacity-60 disabled:cursor-not-allowed transition-all">
+                  {enrollBusy ? <Activity className="animate-spin" size={16} /> : <Camera size={16} />}
+                  {enrollDescriptor ? 'Ambil Ulang' : 'Ambil Foto'}
+                </button>
+                <button onClick={handleSaveFace} disabled={enrollBusy || !enrollDescriptor}
+                  className="flex-1 min-w-[140px] flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold px-4 py-3 rounded-xl text-sm shadow-lg shadow-emerald-600/25 disabled:opacity-60 disabled:cursor-not-allowed transition-all">
+                  <Save size={16} /> Simpan Wajah
+                </button>
+              </div>
+
+              <div className="flex gap-2.5 mt-2.5">
+                <button onClick={handleDeleteFace} disabled={enrollBusy || !enrollHasFace}
+                  className="flex-1 flex items-center justify-center gap-2 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 font-bold px-4 py-3 rounded-xl text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  <Trash2 size={16} /> Hapus Wajah
+                </button>
+                <button onClick={handleCloseEnroll}
+                  className="flex-1 font-bold px-4 py-3 rounded-xl text-sm text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                  Tutup
+                </button>
+              </div>
+
+              <p className="mt-4 text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
+                Template wajah disimpan sebagai {DESCRIPTOR_LENGTH} angka pada kolom FaceDescriptor. Login Wajah hanya untuk kenyamanan, kata sandi tetap berlaku.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL FAQ & TENTANG */}
+        {aboutOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 print:hidden">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setAboutOpen(false)} aria-hidden="true" />
+            <div role="dialog" aria-modal="true" aria-label="FAQ dan Tentang Aplikasi" className={`relative w-full max-w-lg ${card} p-5 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto`}>
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="bg-gradient-to-tr from-blue-600 to-indigo-500 p-2.5 rounded-xl text-white shadow-lg shadow-blue-500/25 shrink-0"><Info size={18} /></div>
+                  <div className="min-w-0">
+                    <h3 className="text-base font-extrabold text-slate-800 dark:text-white truncate">FAQ &amp; Tentang {APP_NAME}</h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">Versi 1.0 &middot; &copy; 2026</p>
+                  </div>
+                </div>
+                <button onClick={() => setAboutOpen(false)} aria-label="Tutup" className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 shrink-0"><X size={18} /></button>
+              </div>
+
+              <div className="space-y-4">
+                <section>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Tentang Aplikasi</p>
+                  <p className={`text-[13px] leading-relaxed text-slate-600 dark:text-slate-300 ${softBox} p-3`}>
+                    {ABOUT_TEXT}
+                  </p>
+                </section>
+
+                <section>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Dibuat Menggunakan</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STACK.map(t => (
+                      <span key={t} className="inline-flex items-center rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">{t}</span>
+                    ))}
+                  </div>
+                </section>
+
+                <section>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">FAQ</p>
+                  <div className="space-y-2">
+                    {FAQS.map(f => (
+                      <details key={f.q} className="group rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 px-3.5 py-2.5 open:bg-indigo-50/50 dark:open:bg-indigo-950/20 transition-colors">
+                        <summary className="flex items-center justify-between gap-2 text-[13px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                          <span className="flex items-center gap-2"><HelpCircle size={14} className="text-indigo-500 shrink-0" /> {f.q}</span>
+                          <ChevronDown size={15} className="text-slate-400 shrink-0 transition-transform group-open:rotate-180" />
+                        </summary>
+                        <p className="mt-1.5 text-[12.5px] leading-relaxed text-slate-500 dark:text-slate-400 pl-6">{f.a}</p>
+                      </details>
+                    ))}
+                  </div>
+                </section>
+
+                <section className={`rounded-xl p-4 ${softBox} border-indigo-200/70 dark:border-indigo-500/30 bg-indigo-50/50 dark:bg-indigo-950/20`}>
+                  <p className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mb-1.5"><Info size={12} /> Dibuat Oleh</p>
+                  <p className="text-[13px] font-extrabold text-slate-800 dark:text-white">Dian Arya Pratama</p>
+                  <p className="text-[12px] text-slate-500 dark:text-slate-400">&copy; 2026 Dian Arya Pratama. Seluruh hak cipta dilindungi. {APP_NAME}.</p>
+                </section>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ASISTEN AI & SUARA */}
+        <Assistant analytics={analyticsContext} />
       </div>
     </div>
   );

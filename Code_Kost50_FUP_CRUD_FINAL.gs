@@ -14,6 +14,61 @@ const HEADERS = [
   'Updated_At'
 ];
 
+// ============ RESET DATA (kecuali Admin) ============
+const RESET_TARGET_SHEETS = ['Hotspot', 'FUP'];
+const PROTECTED_SHEET_NAMES = ['admin'];
+
+function isProtectedSheet_(name) {
+  return PROTECTED_SHEET_NAMES.indexOf(String(name || '').trim().toLowerCase()) !== -1;
+}
+
+function isResettableSheet_(name) {
+  const target = String(name || '').trim().toLowerCase();
+  return RESET_TARGET_SHEETS.some(function (item) {
+    return String(item).trim().toLowerCase() === target;
+  });
+}
+
+function sheetNote_(name) {
+  if (isProtectedSheet_(name)) return 'Data akun admin tidak dapat dihapus.';
+  if (!isResettableSheet_(name)) return 'Hanya tab ' + RESET_TARGET_SHEETS.join(' dan ') + ' yang dapat di-reset.';
+  return '';
+}
+
+function listResetSheets_() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  return spreadsheet.getSheets().map(function (sheet) {
+    const name = sheet.getName();
+    return {
+      name: name,
+      exists: true,
+      protected: !isResettableSheet_(name),
+      note: sheetNote_(name),
+      dataRows: Math.max(0, sheet.getLastRow() - 1)
+    };
+  });
+}
+
+function resetSheets_(names) {
+  const targets = (names || []).filter(Boolean);
+  if (targets.length === 0) throw new Error('Pilih minimal satu data untuk dihapus.');
+
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const cleared = [];
+
+  targets.forEach(function (name) {
+    if (!isResettableSheet_(name)) throw new Error('Data ' + name + ' terkunci dan tidak boleh dihapus.');
+    const sheet = spreadsheet.getSheetByName(name);
+    if (!sheet) throw new Error('Sheet ' + name + ' tidak ditemukan.');
+    const lastRow = sheet.getLastRow();
+    const deletedRows = Math.max(0, lastRow - 1);
+    if (deletedRows > 0) sheet.deleteRows(2, deletedRows);
+    cleared.push({ name: name, deletedRows: deletedRows });
+  });
+
+  return cleared;
+}
+
 function output_(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))
@@ -164,6 +219,10 @@ function doGet(e) {
       return output_({ success: true, message: `Sheet ${SHEET_NAME} siap.` });
     }
 
+    if (action === 'sheets') {
+      return output_({ success: true, data: listResetSheets_() });
+    }
+
     return output_({ success: false, message: 'Action GET tidak dikenali.' });
   } catch (error) {
     return output_({ success: false, message: error.message || String(error) });
@@ -192,6 +251,17 @@ function doPost(e) {
 
     if (action === 'delete') {
       return output_({ success: true, message: 'Provider berhasil dihapus.', data: delete_(body.id) });
+    }
+
+    if (action === 'reset') {
+      const cleared = resetSheets_(body.sheets);
+      const total = cleared.reduce((sum, item) => sum + item.deletedRows, 0);
+      const label = cleared.map(item => `${item.name} (${item.deletedRows})`).join(', ');
+      return output_({
+        success: true,
+        message: total > 0 ? `${total} baris dihapus: ${label}.` : 'Data sudah kosong, tidak ada yang dihapus.',
+        data: cleared
+      });
     }
 
     return output_({ success: false, message: 'Action POST tidak dikenali.' });
