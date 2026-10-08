@@ -35,6 +35,54 @@ export async function groqChat({ messages, key = getGroqKey(), model = GROQ_CHAT
   return typeof content === 'string' ? content.trim() : '';
 }
 
+// ---------------- CHAT STREAMING (SSE, ala ChatGPT) ----------------
+
+export async function* groqChatStream({ messages, key = getGroqKey(), model = GROQ_CHAT_MODEL, temperature = 0.35, maxTokens = 1000, signal } = {}) {
+  if (!key) throw new Error('NO_KEY');
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: true }),
+    signal
+  });
+  if (!res.ok || !res.body) {
+    let msg = `Groq error ${res.status}`;
+    try { const j = await res.json(); if (j && j.error && j.error.message) msg = `${j.error.message} (${res.status})`; } catch { /* abaikan */ }
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      let finish = false;
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || t.startsWith(':')) continue;
+        if (!t.startsWith('data:')) continue;
+        const payload = t.slice(5).trim();
+        if (payload === '[DONE]') { finish = true; continue; }
+        try {
+          const j = JSON.parse(payload);
+          const delta = j && j.choices && j.choices[0] && j.choices[0].delta && j.choices[0].delta.content;
+          if (typeof delta === 'string' && delta) { full += delta; yield delta; }
+          if (j && j.choices && j.choices[0] && j.choices[0].finish_reason) finish = true;
+        } catch { /* keepalive */ }
+      }
+      if (finish) break;
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* abaikan */ }
+  }
+  return full;
+}
+
 // ---------------- STT: Whisper (rekaman) ----------------
 
 export async function groqTranscribe(blob, { key = getGroqKey(), model = GROQ_STT_MODEL } = {}) {

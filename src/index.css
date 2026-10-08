@@ -4,6 +4,16 @@
 
 :root {
   color-scheme: light dark;
+  --brand-blue: #2563eb;
+  --brand-blue-dark: #1d4ed8;
+  --brand-navy: #12224a;
+  --brand-slate: #475569;
+  --brand-muted: #64748b;
+  --brand-ground: #f6f8fb;
+  --brand-mist: #eef4ff;
+  --brand-line: #e2e8f0;
+  --brand-yellow: #fbbf24;
+  --brand-green: #10b981;
 }
 
 html {
@@ -89,4 +99,75 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ================= LANDING PAGE (Smart Kost — gaya nextpreneur.web.id) ================= */
+.font-display { font-family: 'Sora', 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif; }
+.font-jakarta { font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif; }
+
+.bg-brand-ground { background-color: var(--brand-ground); }
+.bg-brand-mist { background-color: var(--brand-mist); }
+.bg-brand-blue { background-color: var(--brand-blue); }
+.bg-brand-blue-dark { background-color: var(--brand-blue-dark); }
+.bg-brand-navy { background-color: var(--brand-navy); }
+.text-brand-navy { color: var(--brand-navy); }
+.text-brand-blue { color: var(--brand-blue); }
+.text-brand-slate { color: var(--brand-slate); }
+.text-brand-muted { color: var(--brand-muted); }
+.border-brand-line { border-color: var(--brand-line); }
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--brand-blue);
+}
+.section-title {
+  font-family: 'Sora', 'Plus Jakarta Sans', sans-serif;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 800;
+  color: var(--brand-navy);
+}
+.card {
+  background: #fff;
+  border: 1px solid var(--brand-line);
+  border-radius: 1rem;
+}
+.btn-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border-radius: 9999px;
+  background: var(--brand-blue);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14.5px;
+  padding: 0.85rem 1.5rem;
+  line-height: 1.2;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+.btn-accent:hover { background: var(--brand-blue-dark); }
+.btn-accent:active { transform: scale(0.98); }
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border-radius: 9999px;
+  border: 1px solid #cbd5e1;
+  color: var(--brand-blue);
+  font-weight: 700;
+  font-size: 14.5px;
+  padding: 0.85rem 1.5rem;
+  line-height: 1.2;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+.btn-ghost:hover { border-color: var(--brand-blue); }
+.btn-ghost:active { transform: scale(0.98); }
+
+@media (min-width: 1024px) {
+  .section-title { font-size: 36px; }
 }

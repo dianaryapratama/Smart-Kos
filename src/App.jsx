@@ -4,7 +4,7 @@ import {
   Wifi, Users, LogOut, Activity, TrendingUp, Download, Bot, AlertTriangle,
   Printer, Lock, Moon, Sun, Menu, X, Server, Plus, Edit, Trash2, Save,
   BarChart2, PieChart as PieChartIcon, RefreshCw, Search, Camera, ScanFace, Check,
-  ChevronDown, HelpCircle, Settings, Info
+  ChevronDown, HelpCircle, Settings, Info, Router
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
@@ -15,26 +15,156 @@ import {
   matchFace, parseDescriptor, DESCRIPTOR_LENGTH
 } from './faceAuth';
 import Assistant from './Assistant';
+import { APP_NAME, ABOUT_TEXT, STACK, FAQS, HOTSPOT_CSV_URL, ADMIN_CSV_URL } from './config';
+import HomePage from './landing/Home';
+import SpeedTestPage from './landing/SpeedTest';
+import CekKuotaPage from './landing/CekKuota';
+import ChatPage from './chat/ChatPage';
+import ChatWidget from './chat/ChatWidget';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#94a3b8'];
 
-const APP_NAME = 'Smart Kost';
 const softBox = 'bg-white dark:bg-slate-900 rounded-xl border border-slate-200/70 dark:border-slate-800';
-const ABOUT_TEXT = 'Smart Kost adalah dashboard manajemen jaringan internet (WiFi hotspot) untuk kost. Aplikasi ini memantau pemakaian data tiap kamar, mengelola batas FUP per ISP, menampilkan tren pemakaian harian, serta menyediakan akses aman melalui kata sandi dan login wajah. Dilengkapi Asisten AI berbasis Groq untuk menanya data dan analitik secara langsung.';
-const STACK = ['React 19', 'Vite', 'Tailwind CSS', 'Recharts', 'lucide-react', 'face-api.js', 'PapaParse', 'Groq AI (LLM & Whisper)', 'Google Sheets', 'Google Apps Script', 'Vercel'];
-const FAQS = [
-  { q: 'Dari mana data dashboard dimuat?', a: 'Data dibaca dari Google Sheets (publish ke CSV) dan diperbarui lewat Google Apps Script untuk aksi simpan, reset, dan wajah.' },
-  { q: 'Mengapa ada login wajah?', a: 'Untuk keamanan ekstra akses administrator. Wajah didaftarkan dari dashboard, lalu cocokkan saat login.' },
-  { q: 'Apa itu FUP?', a: 'Fair Usage Policy — batas pemakaian internet per ISP. Dashboard memperingatkan kamar yang mendekati batas.' },
-  { q: 'Bagaimana asisten AI bekerja?', a: 'Asisten memakai model Groq (gpt-oss-120b) untuk jawaban dan Whisper untuk transkripsi suara, dengan konteks analitik dashboard.' }
-];
-
-// --- GANTI DENGAN URL CSV ANDA ---
-const HOTSPOT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwYILZrPnVQUL19TMIDLnVbVcW_a0LTGxvvb2bJepITRGF5Ldk2joGEjHoJLULKTny63zrcB18r6Hp/pub?gid=123456&single=true&output=csv";
-const ADMIN_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwYILZrPnVQUL19TMIDLnVbVcW_a0LTGxvvb2bJepITRGF5Ldk2joGEjHoJLULKTny63zrcB18r6Hp/pub?gid=1794162175&single=true&output=csv";
 
 const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 30;
+
+// Router MikroTik di jaringan lokal kost
+const MIKROTIK_URL = 'http://192.168.22.1:88/';
+const MIKROTIK_HOST = '192.168.22.1';
+
+// Cek apakah perangkat sedang berada di jaringan lokal (MikroTik reachable)
+async function checkLocalNetwork(timeout = 4000) {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    await fetch(`http://${MIKROTIK_HOST}:88/`, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ==========================================
+// Backdrop jaringan interaktif untuk layar login
+// ==========================================
+function NetworkBackdrop({ accent = '255, 255, 255' }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    const ctx = canvas.getContext('2d');
+    let raf = 0;
+    let w = 0;
+    let h = 0;
+    let particles = [];
+    const mouse = { x: null, y: null };
+    const DPR = Math.min(window.devicePixelRatio || 1, 2);
+    const LINK = 150;
+    const MOUSE_LINK = 220;
+
+    const resize = () => {
+      w = canvas.offsetWidth;
+      h = canvas.offsetHeight;
+      canvas.width = Math.round(w * DPR);
+      canvas.height = Math.round(h * DPR);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      particles = Array.from({ length: 60 }, () => ({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.5,
+        vy: (Math.random() - 0.5) * 0.5,
+        r: Math.random() * 1.8 + 1
+      }));
+    };
+
+    const step = () => {
+      ctx.clearRect(0, 0, w, h);
+      for (const p of particles) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > w) p.vx *= -1;
+        if (p.y < 0 || p.y > h) p.vy *= -1;
+      }
+      for (let i = 0; i < particles.length; i += 1) {
+        for (let j = i + 1; j < particles.length; j += 1) {
+          const a = particles[i];
+          const b = particles[j];
+          const d = Math.hypot(a.x - b.x, a.y - b.y);
+          if (d < LINK) {
+            ctx.strokeStyle = `rgba(${accent},${(1 - d / LINK) * 0.22})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+          }
+        }
+      }
+      if (mouse.x != null) {
+        for (const p of particles) {
+          const d = Math.hypot(p.x - mouse.x, p.y - mouse.y);
+          if (d < MOUSE_LINK) {
+            ctx.strokeStyle = `rgba(125,211,252,${(1 - d / MOUSE_LINK) * 0.55})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(mouse.x, mouse.y);
+            ctx.stroke();
+          }
+        }
+      }
+      for (const p of particles) {
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      raf = requestAnimationFrame(step);
+    };
+
+    resize();
+    raf = requestAnimationFrame(step);
+
+    const onMove = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mouse.x = e.clientX - rect.left;
+      mouse.y = e.clientY - rect.top;
+    };
+    const onLeave = () => { mouse.x = null; mouse.y = null; };
+    const onClick = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      for (let k = 0; k < 7; k += 1) {
+        particles.push({
+          x: x + (Math.random() - 0.5) * 36,
+          y: y + (Math.random() - 0.5) * 36,
+          vx: (Math.random() - 0.5) * 1.4,
+          vy: (Math.random() - 0.5) * 1.4,
+          r: Math.random() * 1.6 + 1
+        });
+      }
+      if (particles.length > 160) particles = particles.slice(-160);
+    };
+    window.addEventListener('resize', resize);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerleave', onLeave);
+    canvas.addEventListener('click', onClick);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', resize);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerleave', onLeave);
+      canvas.removeEventListener('click', onClick);
+    };
+  }, [accent]);
+  return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-hidden="true" />;
+}
 
 // ==========================================
 // HELPER FUNCTIONS
@@ -238,6 +368,12 @@ const Field = ({ label, hint, children }) => (
 function App() {
   // ================= STATE =================
   const [isLoggedIn, setIsLoggedIn] = useState(() => sessionStorage.getItem('kost50_user') !== null);
+  const [route, setRoute] = useState(() => (window.location.hash.replace(/^#/, '') || '/'));
+  useEffect(() => {
+    const onHash = () => setRoute(window.location.hash.replace(/^#/, '') || '/');
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const [currentUser, setCurrentUser] = useState(() => sessionStorage.getItem('kost50_user') || '');
   const [loginInput, setLoginInput] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
@@ -253,6 +389,7 @@ function App() {
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [lanChecking, setLanChecking] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -374,6 +511,18 @@ function App() {
     }
   };
 
+  const handleOpenMikrotik = async () => {
+    if (lanChecking) return;
+    setLanChecking(true);
+    const online = await checkLocalNetwork();
+    setLanChecking(false);
+    if (online) {
+      window.location.href = MIKROTIK_URL;
+    } else {
+      window.alert('Anda tidak berada di jaringan lokal MikroTik.');
+    }
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem('kost50_user');
     setIsLoggedIn(false);
@@ -383,6 +532,7 @@ function App() {
     setLoginMode('password');
     setFaceError('');
     setFaceStatus('');
+    window.location.hash = '/';
   };
 
   // ================= LOGIN WAJAH & PENDAFTARAN =================
@@ -821,26 +971,91 @@ function App() {
     }
   };
 
-  // ================= TAMPILAN LOGIN =================
+  // ================= TAMPILAN LANDING / LOGIN =================
   if (!isLoggedIn) {
+    if (route === '/chat-ai') {
+      return <ChatPage />;
+    }
+    if (route === '/speedtest') {
+      return (<><SpeedTestPage /><ChatWidget /></>);
+    }
+    if (route === '/cek-kuota') {
+      return (<><CekKuotaPage /><ChatWidget /></>);
+    }
+    if (route !== '/login') {
+      return (<><HomePage /><ChatWidget /></>);
+    }
     return (
-      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex items-center justify-center p-4 transition-colors duration-300 relative overflow-hidden print:hidden">
-        <div className="absolute -top-32 -left-32 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" aria-hidden="true"></div>
-        <div className="absolute -bottom-32 -right-32 h-72 w-72 rounded-full bg-indigo-500/10 blur-3xl" aria-hidden="true"></div>
+      <div className="min-h-screen bg-slate-100 dark:bg-slate-950 lg:grid lg:grid-cols-2 transition-colors duration-300 print:hidden">
 
-        <div className="relative max-w-md w-full bg-white dark:bg-slate-900 rounded-3xl shadow-2xl p-7 sm:p-10 border border-slate-200 dark:border-slate-800">
-          <div className="flex justify-between items-start mb-7">
+        {/* ===== KIRI: panel jaringan interaktif ===== */}
+        <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-navy p-10 text-white lg:flex lg:p-14 print:hidden">
+          <NetworkBackdrop />
+          <div className="relative z-10 flex items-center justify-between">
+            <a href="#/" className="flex items-center gap-3">
+              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-11 w-auto rounded-xl bg-white/10 p-1.5" />
+              <span className="font-display text-xl font-extrabold">{APP_NAME}</span>
+            </a>
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-slate-100">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+              </span>
+              Jaringan Aktif
+            </span>
+          </div>
+
+          <div className="relative z-10 max-w-md">
+            <p className="text-[12px] font-extrabold uppercase tracking-[0.2em] text-brand-yellow">Administrator Executive Panel</p>
+            <h1 className="font-display mt-4 text-[38px] font-extrabold leading-[1.08] tracking-tight lg:text-[46px]">
+              Kendalikan seluruh <span className="text-sky-300">jaringan internet kost</span> dalam satu genggaman
+            </h1>
+            <p className="mt-5 text-[14.5px] leading-relaxed text-slate-300">
+              Masuk untuk memantau kuota tiap kamar, mengelola batas FUP, membaca tren pemakaian harian,
+              dan bertanya langsung kepada asisten AI.
+            </p>
+            <ul className="mt-7 space-y-3 text-[13.5px] font-semibold text-slate-200">
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/20 text-emerald-300"><Check size={14} /></span>Pemantauan kuota real-time</li>
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/20 text-emerald-300"><Check size={14} /></span>Manajemen FUP &amp; reset bulanan</li>
+              <li className="flex items-center gap-3"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-400/20 text-emerald-300"><Check size={14} /></span>Asisten AI pendamping pengelola</li>
+            </ul>
+          </div>
+
+          <p className="relative z-10 text-[12px] text-slate-400">&copy; 2026 Dian Arya Pratama &middot; {APP_NAME}</p>
+        </div>
+
+        {/* ===== KANAN: form login ===== */}
+        <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-white p-4 dark:bg-slate-950 sm:p-8">
+          <div className="absolute -top-32 -right-32 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" aria-hidden="true" />
+          <div className="absolute -bottom-32 -left-32 h-72 w-72 rounded-full bg-indigo-500/10 blur-3xl" aria-hidden="true" />
+
+          {/* Brand (mobile) */}
+          <div className="relative z-10 mb-7 flex w-full max-w-md items-center justify-between lg:hidden">
             <div className="flex items-center gap-3">
-              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-12 w-12 rounded-2xl shadow-lg shadow-blue-500/25 shrink-0" />
+              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-11 w-11 rounded-2xl shadow-lg shadow-blue-500/25" />
               <div>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 dark:text-white tracking-tight leading-none">{APP_NAME}</h1>
-                <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mt-1.5 tracking-wide uppercase">Administrator Executive Panel</p>
+                <h1 className="text-xl font-extrabold tracking-tight text-slate-800 dark:text-white leading-none">{APP_NAME}</h1>
+                <p className="mt-1 text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Administrator Executive Panel</p>
               </div>
             </div>
-            <button type="button" aria-label="Ganti tema" onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0">
-              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+            <button type="button" aria-label="Ganti tema" onClick={() => setDarkMode(!darkMode)} className="p-2.5 bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors shrink-0">
+              {darkMode ? <Sun size={17} /> : <Moon size={17} />}
             </button>
           </div>
+
+          <div className="relative z-10 w-full max-w-md">
+            <div className="mb-7 hidden items-center justify-between lg:flex">
+              <div className="flex items-center gap-3">
+                <img src="/favicon.svg" alt="Logo Smart Kost" className="h-12 w-12 rounded-2xl shadow-lg shadow-blue-500/25 shrink-0" />
+                <div>
+                  <h1 className="text-2xl font-extrabold tracking-tight text-slate-800 dark:text-white leading-none">{APP_NAME}</h1>
+                  <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Administrator Executive Panel</p>
+                </div>
+              </div>
+              <button type="button" aria-label="Ganti tema" onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors shrink-0">
+                {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+            </div>
 
           {loginError && (
             <div role="alert" className="mb-6 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 p-3 rounded-xl text-sm font-medium border border-red-100 dark:border-red-900/50 flex items-start gap-2">
@@ -914,9 +1129,16 @@ function App() {
             Akses terbatas untuk administrator. Percobaan gagal maksimal {MAX_ATTEMPTS} kali sebelum terkunci {LOCK_SECONDS} detik.
           </p>
         </div>
-        <p className="mt-4 text-[10px] text-center text-slate-400 dark:text-slate-500 print:hidden">
+        <a href="#/"
+          className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 dark:border-slate-700 px-5 py-2.5 text-xs font-bold text-slate-500 dark:text-slate-400 hover:border-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors print:hidden">
+          <svg strokeWidth="2" aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+          Kembali ke Beranda
+        </a>
+        <p className="mt-4 text-[10px] text-center text-slate-400 dark:text-slate-500 lg:hidden print:hidden">
           &copy; 2026 Dian Arya Pratama &middot; {APP_NAME}
         </p>
+        </div>
       </div>
     );
   }
@@ -959,6 +1181,15 @@ function App() {
             {navItem('fup-monitor', Server, 'Sistem FUP ISP', 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300')}
             {navItem('rekap', Activity, 'Log Server Mentah', 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-white')}
             {navItem('reset', Trash2, 'Reset Data', 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300')}
+            <button type="button" onClick={handleOpenMikrotik} disabled={lanChecking}
+              title={`Buka kontroler MikroTik di ${MIKROTIK_URL}`}
+              className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all border-l-4 border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200 disabled:opacity-60">
+              <span className="relative shrink-0">
+                <Router size={18} className="text-sky-500" />
+                {lanChecking && <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-500" /></span>}
+              </span>
+              <span className="truncate">{lanChecking ? 'Memeriksa jaringan lokal...' : 'MikroTik Router (LAN)'}</span>
+            </button>
           </nav>
 
           <div className="mt-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-3.5">
