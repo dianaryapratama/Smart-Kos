@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot, ExternalLink, RefreshCw, Send, Square, User } from 'lucide-react';
 import { useAiChat } from './useAiChat';
 import RichText from './rich';
-import { APP_NAME } from '../config';
 
 const SUGGESTIONS = [
   'Kamar mana yang paling boros?',
@@ -66,11 +65,8 @@ export default function ChatPage() {
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-4xl items-center gap-2 px-3 sm:gap-3 sm:px-4">
           <a href="#/" className="flex min-w-0 items-center gap-2.5">
-            <img src="/favicon.svg" alt="Logo" className="h-8 w-auto shrink-0" />
-            <span className="font-display truncate text-[16px] font-extrabold text-slate-800 sm:text-[17px]">
-              <span className="sm:hidden">Chat AI</span>
-              <span className="hidden sm:inline">Chat AI · {APP_NAME}</span>
-            </span>
+            <img src="/logo.png" alt="Smart Kost" className="h-7 w-auto shrink-0 sm:h-9" />
+            <span className="font-display truncate text-[16px] font-extrabold text-slate-800 sm:text-[17px]">Chat AI</span>
           </a>
           <div className="min-w-0 flex-1" />
           <div className="hidden md:block"><StatusBadge dataState={dataState} analytics={dataState.analytics} /></div>
@@ -90,7 +86,7 @@ export default function ChatPage() {
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 pb-44 pt-4 sm:pb-40">
         {messages.length === 0 && (
           <div className="py-8 text-center">
-            <img src="/favicon.svg" alt="" className="mx-auto h-16 w-auto" />
+            <img src="/logo.png" alt="" className="mx-auto h-14 w-auto sm:h-16" />
             <h1 className="font-display mt-5 text-2xl font-extrabold text-slate-800 sm:text-3xl">
               Tanya apa saja tentang data kost
             </h1>

@@ -992,9 +992,8 @@ function App() {
         <div className="relative hidden flex-col justify-between overflow-hidden bg-brand-navy p-10 text-white lg:flex lg:p-14 print:hidden">
           <NetworkBackdrop />
           <div className="relative z-10 flex items-center justify-between">
-            <a href="#/" className="flex items-center gap-3">
-              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-11 w-auto rounded-xl bg-white/10 p-1.5" />
-              <span className="font-display text-xl font-extrabold">{APP_NAME}</span>
+            <a href="#/" aria-label={`${APP_NAME} — halaman beranda`} className="flex items-center">
+              <img src="/logo.png" alt={`Logo ${APP_NAME}`} className="h-16 w-auto rounded-2xl bg-white p-2.5" />
             </a>
             <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-[10.5px] font-bold uppercase tracking-wider text-slate-100">
               <span className="relative flex h-2 w-2">
@@ -1031,13 +1030,7 @@ function App() {
 
           {/* Brand (mobile) */}
           <div className="relative z-10 mb-7 flex w-full max-w-md items-center justify-between lg:hidden">
-            <div className="flex items-center gap-3">
-              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-11 w-11 rounded-2xl shadow-lg shadow-blue-500/25" />
-              <div>
-                <h1 className="text-xl font-extrabold tracking-tight text-slate-800 dark:text-white leading-none">{APP_NAME}</h1>
-                <p className="mt-1 text-[9.5px] font-bold uppercase tracking-wider text-slate-400">Administrator Executive Panel</p>
-              </div>
-            </div>
+            <img src="/logo.png" alt={`Logo ${APP_NAME}`} className="h-10 w-auto shrink-0 dark:rounded-2xl dark:bg-white dark:p-2" />
             <button type="button" aria-label="Ganti tema" onClick={() => setDarkMode(!darkMode)} className="p-2.5 bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors shrink-0">
               {darkMode ? <Sun size={17} /> : <Moon size={17} />}
             </button>
@@ -1045,13 +1038,7 @@ function App() {
 
           <div className="relative z-10 w-full max-w-md">
             <div className="mb-7 hidden items-center justify-between lg:flex">
-              <div className="flex items-center gap-3">
-                <img src="/favicon.svg" alt="Logo Smart Kost" className="h-12 w-12 rounded-2xl shadow-lg shadow-blue-500/25 shrink-0" />
-                <div>
-                  <h1 className="text-2xl font-extrabold tracking-tight text-slate-800 dark:text-white leading-none">{APP_NAME}</h1>
-                  <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Administrator Executive Panel</p>
-                </div>
-              </div>
+              <img src="/logo.png" alt={`Logo ${APP_NAME}`} className="h-12 w-auto dark:rounded-2xl dark:bg-white dark:p-2" />
               <button type="button" aria-label="Ganti tema" onClick={() => setDarkMode(!darkMode)} className="p-2 bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors shrink-0">
                 {darkMode ? <Sun size={18} /> : <Moon size={18} />}
               </button>
@@ -1163,12 +1150,8 @@ function App() {
       {/* SIDEBAR */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shadow-2xl md:shadow-none transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 md:w-64 xl:w-72 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} print:hidden`}>
         <div className="h-20 flex items-center justify-between px-5 border-b border-slate-100 dark:border-slate-800 shrink-0">
-          <div className="flex items-center min-w-0 gap-3">
-            <img src="/favicon.svg" alt="Logo Smart Kost" className="h-10 w-10 rounded-xl shadow-lg shadow-blue-600/25 shrink-0" />
-            <div className="min-w-0">
-              <p className="text-lg font-extrabold tracking-tight leading-none truncate">{APP_NAME}</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 mt-1.5">Network Console</p>
-            </div>
+          <div className="flex items-center">
+            <img src="/logo.png" alt={`Logo ${APP_NAME}`} className="h-9 w-auto shrink-0 dark:rounded-2xl dark:bg-white dark:p-2 sm:h-10" />
           </div>
           <button aria-label="Tutup menu" className="md:hidden text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 p-1" onClick={() => setIsMobileOpen(false)}><X size={22} /></button>
         </div>

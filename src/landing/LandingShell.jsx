@@ -10,8 +10,16 @@ const NAV_SECTIONS = [
   { label: 'FAQ', id: 'faq' }
 ];
 
+const TOOL_LINKS = [
+  { label: 'Cek Kuota', path: '/cek-kuota' },
+  { label: 'Speed Test', path: '/speedtest' },
+  { label: 'Chat AI', path: '/chat-ai' }
+];
+
 export function Nav({ path = '/' }) {
   const isHome = path === '/';
+  const toolsActive = TOOL_LINKS.some(l => l.path === path);
+  const closeMenu = (e) => e.currentTarget.closest('details')?.removeAttribute('open');
   const onPage = p => (e) => {
     e.preventDefault();
     if (isHome && p.startsWith('/')) {
@@ -41,27 +49,21 @@ export function Nav({ path = '/' }) {
             {!isHome && (
               <a href="#/" className="block rounded-lg px-4 py-3 text-sm font-semibold text-brand-slate hover:bg-brand-ground">Beranda</a>
             )}
-            <a href="#/cek-kuota"
-              className="block rounded-lg px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-brand-ground">
-              Cek Kuota
-            </a>
-            <a href="#/speedtest"
-              className="block rounded-lg px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-brand-ground">
-              Speed Test
-            </a>
-            <a href="#/chat-ai"
-              className="block rounded-lg px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-brand-ground">
-              Chat AI
-            </a>
+            <p className="px-4 pb-1 pt-3 text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Mulai</p>
+            {TOOL_LINKS.map(l => (
+              <a key={l.path} href={`#${l.path}`} onClick={closeMenu}
+                className={`block rounded-lg px-4 py-3 text-sm font-semibold hover:bg-brand-ground ${path === l.path ? 'text-brand-blue' : 'text-slate-600'}`}>
+                {l.label}
+              </a>
+            ))}
             <a href="#/login" className="mt-2 block rounded-lg bg-brand-blue px-4 py-3 text-center text-sm font-bold text-white">
               Masuk Admin
             </a>
           </div>
         </details>
 
-        <a href="#/" className="flex items-center gap-3">
-          <img src="/favicon.svg" alt="Logo Smart Kost" className="h-10 w-auto rounded-xl" />
-          <span className="font-display text-xl font-extrabold text-brand-navy">{APP_NAME}</span>
+        <a href="#/" aria-label={`${APP_NAME} — halaman beranda`} className="flex items-center">
+          <img src="/logo.png" alt={`Logo ${APP_NAME}`} className="h-9 w-auto shrink-0 sm:h-10 xl:h-11" />
         </a>
 
         <nav className="hidden items-center gap-7 text-[14.5px] font-semibold text-slate-600 xl:flex">
@@ -74,15 +76,21 @@ export function Nav({ path = '/' }) {
           {!isHome && (
             <a href="#/" className="transition hover:text-brand-blue">Beranda</a>
           )}
-          <a href="#/cek-kuota" className={`transition hover:text-brand-blue ${path === '/cek-kuota' ? 'text-brand-blue' : ''}`}>
-            Cek Kuota
-          </a>
-          <a href="#/speedtest" className={`transition hover:text-brand-blue ${path === '/speedtest' ? 'text-brand-blue' : ''}`}>
-            Speed Test
-          </a>
-          <a href="#/chat-ai" className={`transition hover:text-brand-blue ${path === '/chat-ai' ? 'text-brand-blue' : ''}`}>
-            Chat AI
-          </a>
+          <details className="group relative">
+            <summary className={`flex cursor-pointer list-none items-center gap-1.5 transition ${toolsActive ? 'text-brand-blue' : 'hover:text-brand-blue'}`}>
+              Mulai
+              <svg strokeWidth="2.5" aria-hidden="true" className="h-3.5 w-3.5 transition-transform group-open:rotate-180"
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+            </summary>
+            <div className="absolute right-0 z-50 mt-3 w-48 rounded-2xl border border-brand-line bg-white p-2 shadow-xl">
+              {TOOL_LINKS.map(l => (
+                <a key={l.path} href={`#${l.path}`} onClick={closeMenu}
+                  className={`block rounded-lg px-4 py-2.5 text-sm font-semibold transition hover:bg-brand-ground hover:text-brand-blue ${path === l.path ? 'text-brand-blue' : 'text-slate-600'}`}>
+                  {l.label}
+                </a>
+              ))}
+            </div>
+          </details>
         </nav>
 
         <div className="flex items-center gap-3">
@@ -108,9 +116,8 @@ export function Footer() {
       <div className="mx-auto max-w-[1240px] px-5 py-14 lg:px-0">
         <div className="grid gap-10 lg:grid-cols-12 lg:gap-8">
           <div className="flex flex-col gap-5 lg:col-span-4">
-            <a href="#/" className="flex items-center gap-3 w-fit">
-              <img src="/favicon.svg" alt="Logo Smart Kost" className="h-11 w-auto rounded-xl bg-white/10 p-1" />
-              <span className="font-display text-xl font-extrabold">{APP_NAME}</span>
+            <a href="#/" aria-label={`${APP_NAME} — halaman beranda`} className="flex w-fit items-center">
+              <img src="/logo-footer.png" alt={`Logo ${APP_NAME}`} className="h-28 w-auto rounded-2xl bg-white p-3 sm:h-32" />
             </a>
             <p className="max-w-[330px] text-[13.5px] leading-relaxed text-slate-400">
               Dashboard manajemen internet WiFi hotspot &amp; FUP untuk kost. Pantau kuota setiap kamar, cek batas
