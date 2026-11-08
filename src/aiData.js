@@ -3,9 +3,8 @@
 // Pipeline identik dengan dashboard admin supaya angka konsisten.
 // ==========================================
 
-import Papa from 'papaparse';
-import { HOTSPOT_CSV_URL } from './config.js';
 import { parseDateTs } from './landing/kuota.js';
+import { loadHotspotRows } from './dataSource.js';
 
 const round = (n) => parseFloat(Number(n).toFixed(2));
 const fmt = (n) => Number(n).toLocaleString('id-ID');
@@ -117,7 +116,7 @@ export function buildDeepSystemPrompt(model, analytics) {
   const peak = a.peakLabel || 'belum ada';
 
   return `Kamu adalah "Asisten AI Smart Kost" — asisten digital yang ramah dan cerdas, Bahasa Indonesia, membantai soal apa saja seperti chatbot umum, tapi punya akses DATA SPREADSHEET pemakaian internet kost sehingga bisa menjawab detail tentang data.
-Sumber data: Google Sheets tab "Hotspot", kolom Tanggal/Username/Total (MB) yang diambil dari MikroTik secara kumulatif.
+Sumber data: pemakaian hotspot MikroTik (realtime via tunnel VPN), dengan Google Sheets tab "Hotspot" (kolom Tanggal/Username/Total (MB)) sebagai cadangan & riwayat kumulatif.
 
 CARA MENJAWAB:
 - Pertanyaan umum (apa saja: tips, pengetahuan, obrolan, cara pakai aplikasi) → jawab dengan alami dan membantu, seperti chatbot pada umumnya. Tidak perlu membahas data.
@@ -146,27 +145,15 @@ ATURAN:
 
 // ---------------- Fetch data (dibagikan antar halaman via cache) ----------------
 
-function fetchRows(url) {
-  return new Promise((resolve, reject) => {
-    Papa.parse(url, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => resolve(res.data || []),
-      error: (err) => reject(err)
-    });
-  });
-}
-
 let chatDataPromise = null;
 
 export function getChatData(refresh = false) {
   if (!chatDataPromise || refresh) {
     chatDataPromise = (async () => {
-      const rows = await fetchRows(HOTSPOT_CSV_URL);
-      const model = buildDataModel(rows);
+      const result = await loadHotspotRows();
+      const model = buildDataModel(result.rows);
       const analytics = buildAnalytics(model);
-      return { analytics, model, at: Date.now() };
+      return { analytics, model, at: Date.now(), source: result.source };
     })().catch((err) => {
       chatDataPromise = null; // gagal -> boleh dicoba lagi nanti
       throw err;

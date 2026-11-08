@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import Papa from 'papaparse';
 import {
   AlertCircle, ArrowRight, CalendarDays, Gauge, History, Loader2, Search,
   SearchX, UserRound
 } from 'lucide-react';
 import { Nav, Footer } from './LandingShell';
-import { HOTSPOT_CSV_URL, KUOTA_CATEGORIES } from '../config';
+import { KUOTA_CATEGORIES } from '../config';
+import { loadHotspotRows } from '../dataSource';
 import { mbToGB, aggregateByUser, parseCsvRows, formatDateTs } from './kuota';
 
 const CAT_META = {
@@ -20,36 +20,25 @@ export default function CekKuota() {
   const [errorMsg, setErrorMsg] = useState('');
   const [rows, setRows] = useState([]);
 
-  const runSearch = () => {
+  const runSearch = async () => {
     const q = query.trim().toLowerCase();
     if (!q) return;
     setStatus('loading');
-    Papa.parse(HOTSPOT_CSV_URL, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: (res) => {
-        const { data, errors } = res;
-        if (errors.length) {
-          setErrorMsg('Gagal membaca data: ' + (errors[0].message || 'format CSV tidak cocok'));
-          setStatus('error');
-          return;
-        }
-        const parsed = parseCsvRows(data);
-        if (!parsed.length) {
-          setErrorMsg('Data kuota masih kosong atau format CSV tidak dikenali.');
-          setStatus('error');
-          return;
-        }
-        setRows(parsed);
-        setStatus('done');
-        setErrorMsg('');
-      },
-      error: () => {
-        setErrorMsg('Gagal memuat data. Cek koneksi atau konfigurasi URL CSV.');
+    try {
+      const result = await loadHotspotRows();
+      const parsed = parseCsvRows(result.rows);
+      if (!parsed.length) {
+        setErrorMsg('Data kuota masih kosong atau format tidak dikenali.');
         setStatus('error');
+        return;
       }
-    });
+      setRows(parsed);
+      setStatus('done');
+      setErrorMsg('');
+    } catch (err) {
+      setErrorMsg(err && err.message ? err.message : 'Gagal memuat data kuota.');
+      setStatus('error');
+    }
   };
 
   const byUser = useMemo(() => aggregateByUser(rows), [rows]);
@@ -124,7 +113,7 @@ export default function CekKuota() {
         {loading && (
           <div className="flex flex-col items-center gap-3 py-14 text-brand-muted">
             <Loader2 className="h-8 w-8 animate-spin text-brand-blue" />
-            <p className="text-[14px] font-semibold">Memuat data kuota dari Google Sheets…</p>
+            <p className="text-[14px] font-semibold">Memuat data kuota realtime…</p>
           </div>
         )}
 

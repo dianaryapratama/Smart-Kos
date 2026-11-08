@@ -2,6 +2,9 @@ export const APP_NAME = 'Smart Kost';
 export const AUTHOR_NAME = 'Dian Arya Pratama';
 export const COPYRIGHT_YEAR = 2026;
 
+// Google AdSense — hanya dimuat pada halaman non-admin (sebelum login)
+export const ADSENSE_CLIENT = 'ca-pub-1313683269948868';
+
 export const ABOUT_TEXT = 'Smart Kost adalah dashboard manajemen jaringan internet (WiFi hotspot) untuk kost. Aplikasi ini memantau pemakaian data tiap kamar, mengelola batas FUP per ISP, menampilkan tren pemakaian harian, serta menyediakan akses aman melalui kata sandi dan login wajah. Dilengkapi Asisten AI berbasis Groq untuk menanya data dan analitik secara langsung.';
 
 export const STACK = [
@@ -30,6 +33,25 @@ export const FAQS = [
 // --- GANTI DENGAN URL CSV ANDA ---
 export const HOTSPOT_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwYILZrPnVQUL19TMIDLnVbVcW_a0LTGxvvb2bJepITRGF5Ldk2joGEjHoJLULKTny63zrcB18r6Hp/pub?gid=123456&single=true&output=csv";
 export const ADMIN_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQwYILZrPnVQUL19TMIDLnVbVcW_a0LTGxvvb2bJepITRGF5Ldk2joGEjHoJLULKTny63zrcB18r6Hp/pub?gid=1794162175&single=true&output=csv";
+
+// ================= SUMBER DATA (MODE TOGGLE) =================
+// Dua mode yang bisa dipilih dari dashboard:
+//   'tunnel' -> data realtime langsung dari MikroTik via VPN tunnel
+//   'sheets' -> data dari Google Sheets (cadangan)
+export const DEFAULT_DATA_MODE = String(import.meta.env.VITE_DATA_MODE || 'tunnel').toLowerCase() === 'sheets'
+  ? 'sheets'
+  : 'tunnel';
+export const DATA_MODE_STORAGE_KEY = 'kost50_data_mode';
+// Interval polling data realtime ke router (dalam milidetik)
+export const REALTIME_POLL_MS = Number(import.meta.env.VITE_POLL_INTERVAL_MS) || 30000;
+// Interval polling metrik monitoring perangkat (CPU, trafik, dsb.) — lebih cepat
+export const STATS_POLL_MS = Number(import.meta.env.VITE_STATS_POLL_MS) || 5000;
+// Interval muat ulang data spreadsheet untuk grafik bandwidth
+export const SHEET_REFRESH_MS = Number(import.meta.env.VITE_SHEET_REFRESH_MS) || 300000;
+
+// Webfig MikroTik via tunnel VPN (dibuka dari dashboard admin).
+// Gunakan http:// (tunnel tidak memakai sertifikat SSL).
+export const WEBFIG_URL = import.meta.env.VITE_WEBFIG_URL || 'http://remote5.vpnmurahjogja.my.id:12179/';
 
 // Nilai kuota: kategori pemakaian untuk fitur Cek Kuota publik
 // Normal: <= rata-rata · Waspada: sampai 2x rata-rata · Tidak Normal: > 2x rata-rata

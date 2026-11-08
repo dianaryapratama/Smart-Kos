@@ -15,7 +15,9 @@ import {
   matchFace, parseDescriptor, DESCRIPTOR_LENGTH
 } from './faceAuth';
 import Assistant from './Assistant';
-import { APP_NAME, ABOUT_TEXT, STACK, FAQS, HOTSPOT_CSV_URL, ADMIN_CSV_URL } from './config';
+import { APP_NAME, ABOUT_TEXT, STACK, FAQS, ADMIN_CSV_URL, REALTIME_POLL_MS, DEFAULT_DATA_MODE, DATA_MODE_STORAGE_KEY, WEBFIG_URL, ADSENSE_CLIENT } from './config';
+import { loadHotspotRows } from './dataSource';
+import RealtimeMonitor from './RealtimeMonitor';
 import HomePage from './landing/Home';
 import SpeedTestPage from './landing/SpeedTest';
 import CekKuotaPage from './landing/CekKuota';
@@ -28,27 +30,6 @@ const softBox = 'bg-white dark:bg-slate-900 rounded-xl border border-slate-200/7
 
 const MAX_ATTEMPTS = 5;
 const LOCK_SECONDS = 30;
-
-// Router MikroTik di jaringan lokal kost
-const MIKROTIK_URL = 'http://192.168.22.1:88/';
-const MIKROTIK_HOST = '192.168.22.1';
-
-// Cek apakah perangkat sedang berada di jaringan lokal (MikroTik reachable)
-async function checkLocalNetwork(timeout = 4000) {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    await fetch(`http://${MIKROTIK_HOST}:88/`, {
-      mode: 'no-cors',
-      cache: 'no-store',
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 // ==========================================
 // Backdrop jaringan interaktif untuk layar login
@@ -347,6 +328,24 @@ const Pill = ({ tone = 'slate', children }) => {
   return <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wide ${tones[tone]}`}>{children}</span>;
 };
 
+// Toggle pemilih sumber data: Realtime (tunnel) <-> Spreadsheet
+const DataModeToggle = ({ mode, onChange, className = '' }) => {
+  const base = 'px-3 py-1.5 text-[11px] font-bold rounded-lg transition-colors';
+  const idle = 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200';
+  return (
+    <div className={`inline-flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl ${className}`} role="group" aria-label="Pilih sumber data">
+      <button type="button" onClick={() => onChange('tunnel')} aria-pressed={mode === 'tunnel'} title="Data realtime langsung dari MikroTik via VPN"
+        className={`${base} ${mode === 'tunnel' ? 'bg-emerald-500 text-white shadow-sm' : idle}`}>
+        Realtime
+      </button>
+      <button type="button" onClick={() => onChange('sheets')} aria-pressed={mode === 'sheets'} title="Data dari Google Sheets (cadangan)"
+        className={`${base} ${mode === 'sheets' ? 'bg-sky-500 text-white shadow-sm' : idle}`}>
+        Spreadsheet
+      </button>
+    </div>
+  );
+};
+
 const EmptyState = ({ Icon, title, hint }) => (
   <div className={`${card} p-10 text-center`}>
     <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-slate-100 dark:bg-slate-700 flex items-center justify-center text-slate-400">
@@ -380,16 +379,22 @@ function App() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [lockedUntil, setLockedUntil] = useState(0);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   const [dataHotspot, setDataHotspot] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [dataSource, setDataSource] = useState(''); // 'tunnel' | 'sheets' | ''
+  const [dataSyncedAt, setDataSyncedAt] = useState(null);
+  const [tunnelError, setTunnelError] = useState('');
+  const [dataMode, setDataMode] = useState(() => {
+    const saved = localStorage.getItem(DATA_MODE_STORAGE_KEY);
+    return saved === 'sheets' || saved === 'tunnel' ? saved : DEFAULT_DATA_MODE;
+  });
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [lanChecking, setLanChecking] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -439,15 +444,39 @@ function App() {
     localStorage.setItem('kost50_dark', darkMode ? '1' : '0');
   }, [darkMode]);
 
+  // Muat script Google AdSense hanya pada halaman non-admin (belum login)
+  useEffect(() => {
+    const selector = `script[data-adsense-client="${ADSENSE_CLIENT}"]`;
+    const existing = document.querySelector(selector);
+    if (isLoggedIn) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) return;
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`;
+    script.crossOrigin = 'anonymous';
+    script.dataset.adsenseClient = ADSENSE_CLIENT;
+    document.head.appendChild(script);
+  }, [isLoggedIn]);
+
   useEffect(() => {
     if (!isLoggedIn) return;
     let cancelled = false;
-    setFupLoading(true);
-    setFupError('');
-    fupFetchAll()
-      .then(list => { if (!cancelled) setFupList(list); })
-      .catch(err => { if (!cancelled) setFupError(apiError(err)); })
-      .finally(() => { if (!cancelled) setFupLoading(false); });
+    const run = async () => {
+      setFupLoading(true);
+      setFupError('');
+      try {
+        const list = await fupFetchAll();
+        if (!cancelled) setFupList(list);
+      } catch (err) {
+        if (!cancelled) setFupError(apiError(err));
+      } finally {
+        if (!cancelled) setFupLoading(false);
+      }
+    };
+    run();
     return () => { cancelled = true; };
   }, [isLoggedIn, reloadKey]);
 
@@ -511,16 +540,9 @@ function App() {
     }
   };
 
-  const handleOpenMikrotik = async () => {
-    if (lanChecking) return;
-    setLanChecking(true);
-    const online = await checkLocalNetwork();
-    setLanChecking(false);
-    if (online) {
-      window.location.href = MIKROTIK_URL;
-    } else {
-      window.alert('Anda tidak berada di jaringan lokal MikroTik.');
-    }
+  const handleOpenMikrotik = () => {
+    // Webfig via tunnel VPN (reachable dari mana saja, tanpa cek jaringan lokal)
+    window.open(WEBFIG_URL, '_blank', 'noopener,noreferrer');
   };
 
   const handleLogout = () => {
@@ -711,28 +733,45 @@ function App() {
     };
   }, []);
 
-  // ================= FETCH DATA =================
+  // ================= FETCH DATA (mode tunnel realtime / spreadsheet) =================
   useEffect(() => {
     if (!isLoggedIn) return;
-    setLoading(true);
-    setFetchError('');
-    Papa.parse(HOTSPOT_CSV_URL, {
-      download: true,
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const valid = results.data
-          .filter(row => row.Username && row.Username.trim() !== '')
-          .map(row => ({ ...row, Username: row.Username.trim() }));
-        setDataHotspot(valid);
-        setLoading(false);
-      },
-      error: () => {
-        setFetchError('Gagal memuat data hotspot. Periksa URL CSV atau koneksi internet.');
-        setLoading(false);
+    let cancelled = false;
+    let timer = null;
+
+    const load = async (showSpinner) => {
+      if (showSpinner) setLoading(true);
+      try {
+        const result = await loadHotspotRows(dataMode);
+        if (cancelled) return;
+        setDataHotspot(result.rows);
+        setDataSource(result.source);
+        setDataSyncedAt(result.syncedAt || new Date().toISOString());
+        setTunnelError(result.tunnelError || '');
+        setFetchError('');
+      } catch (err) {
+        if (cancelled) return;
+        setFetchError(err && err.message ? err.message : 'Gagal memuat data hotspot.');
+        setDataSource('');
+        if (dataMode === 'tunnel') setTunnelError(err && err.message ? err.message : 'Tunnel MikroTik tidak dapat dihubungi.');
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    });
-  }, [isLoggedIn, reloadKey]);
+    };
+
+    load(true);
+    timer = setInterval(() => load(false), REALTIME_POLL_MS);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [isLoggedIn, reloadKey, dataMode]);
+
+  // Simpan pilihan sumber data
+  useEffect(() => {
+    localStorage.setItem(DATA_MODE_STORAGE_KEY, dataMode);
+  }, [dataMode]);
 
   // ================= PERHITUNGAN DATA (memoized) =================
   const { aiDailyData, networkTrendData, donutChartData, chartDataBar } = useMemo(() => {
@@ -767,15 +806,12 @@ function App() {
       latest[user] = records[records.length - 1].totalVal; // data terbaru, bukan baris terakhir di sheet
     });
 
-    let running = 0;
-    const trend = Object.values(trendByDate).sort((a, b) => a.ts - b.ts).map(item => {
-      running += item.harian;
-      return {
-        Tanggal: shortDate(item.Tanggal), // DD/MM konsisten untuk label sumbu X
-        PemakaianHarian: parseFloat(item.harian.toFixed(2)),
-        TotalKumulatif: parseFloat(running.toFixed(2))
-      };
-    });
+    const sortedTrend = Object.values(trendByDate).sort((a, b) => a.ts - b.ts);
+    const trend = sortedTrend.map((item, i) => ({
+      Tanggal: shortDate(item.Tanggal), // DD/MM konsisten untuk label sumbu X
+      PemakaianHarian: parseFloat(item.harian.toFixed(2)),
+      TotalKumulatif: parseFloat(sortedTrend.slice(0, i + 1).reduce((sum, x) => sum + x.harian, 0).toFixed(2))
+    }));
 
     const bar = Object.entries(latest)
       .map(([name, v]) => ({ name, totalMB: parseFloat(v.toFixed(2)) }))
@@ -1164,29 +1200,42 @@ function App() {
             {navItem('fup-monitor', Server, 'Sistem FUP ISP', 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300')}
             {navItem('rekap', Activity, 'Log Server Mentah', 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-white')}
             {navItem('reset', Trash2, 'Reset Data', 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300')}
-            <button type="button" onClick={handleOpenMikrotik} disabled={lanChecking}
-              title={`Buka kontroler MikroTik di ${MIKROTIK_URL}`}
-              className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all border-l-4 border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200 disabled:opacity-60">
+            <button type="button" onClick={handleOpenMikrotik}
+              title={`Buka Webfig MikroTik (tunnel VPN) di ${WEBFIG_URL}`}
+              className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all border-l-4 border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 hover:text-slate-900 dark:hover:text-slate-200">
               <span className="relative shrink-0">
                 <Router size={18} className="text-sky-500" />
-                {lanChecking && <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-75" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-sky-500" /></span>}
               </span>
-              <span className="truncate">{lanChecking ? 'Memeriksa jaringan lokal...' : 'MikroTik Router (LAN)'}</span>
+              <span className="truncate">MikroTik Webfig (Tunnel)</span>
             </button>
           </nav>
 
           <div className="mt-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 p-3.5">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Status Sumber Data</p>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-2">Sumber Data</p>
+            <DataModeToggle mode={dataMode} onChange={setDataMode} className="mb-3 w-full justify-center" />
             <ul className="space-y-2 text-xs text-slate-500 dark:text-slate-400">
               <li className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : fetchError ? 'bg-red-500' : 'bg-emerald-500'}`}></span>Sheet Hotspot</span>
-                <span className="font-bold text-slate-600 dark:text-slate-300">{dataHotspot.length} baris</span>
+                <span className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : dataSource ? (dataSource === 'tunnel' ? 'bg-emerald-500' : 'bg-sky-500') : 'bg-red-500'}`}></span>
+                  {dataMode === 'tunnel' ? 'Tunnel MikroTik (Realtime)' : 'Google Sheets (Cadangan)'}
+                </span>
+                <span className="font-bold text-slate-600 dark:text-slate-300">{dataSource ? 'Aktif' : '—'}</span>
+              </li>
+              <li className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-slate-300 dark:bg-slate-600"></span>Baris data</span>
+                <span className="font-bold text-slate-600 dark:text-slate-300">{dataHotspot.length}</span>
               </li>
               <li className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${fupLoading ? 'bg-amber-500 animate-pulse' : fupError ? 'bg-red-500' : 'bg-emerald-500'}`}></span>Sheet FUP ISP</span>
                 <span className="font-bold text-slate-600 dark:text-slate-300">{fupList.length} ISP</span>
               </li>
             </ul>
+            {dataSyncedAt && (
+              <p className="mt-2 text-[10px] text-slate-400">Sinkron terakhir: {new Date(dataSyncedAt).toLocaleTimeString('id-ID')}</p>
+            )}
+            {tunnelError && dataMode === 'tunnel' && (
+              <p className="mt-1 text-[10px] leading-snug text-amber-600 dark:text-amber-400">Tunnel: {tunnelError}</p>
+            )}
           </div>
         </div>
 
@@ -1228,9 +1277,10 @@ function App() {
             </div>
           </div>
           <div className="flex items-center gap-2.5 shrink-0">
+            <DataModeToggle mode={dataMode} onChange={setDataMode} className="hidden md:inline-flex" />
             <span className="hidden lg:inline-flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-full">
-              <span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : fetchError ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
-              {loading ? 'Memuat...' : fetchError ? 'Gagal memuat' : `${dataHotspot.length} record`}
+              <span className={`h-2 w-2 rounded-full ${loading ? 'bg-amber-500 animate-pulse' : dataSource === 'tunnel' ? 'bg-emerald-500' : dataSource === 'sheets' ? 'bg-sky-500' : 'bg-red-500'}`}></span>
+              {loading ? 'Memuat...' : fetchError ? 'Gagal memuat' : dataSource === 'tunnel' ? `Realtime · ${dataHotspot.length} record` : `Spreadsheet · ${dataHotspot.length} record`}
             </span>
             <button aria-label="Muat ulang data" title="Muat ulang data" onClick={() => setReloadKey(k => k + 1)} disabled={loading} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 text-slate-600 dark:text-slate-300">
               <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
@@ -1295,7 +1345,7 @@ function App() {
                 <Activity className="animate-spin text-blue-500" size={26} />
               </div>
               <p className="font-bold text-slate-600 dark:text-slate-200">Memuat analitik jaringan...</p>
-              <p className="text-xs text-slate-400">Mengambil data dari Google Sheets</p>
+              <p className="text-xs text-slate-400">{dataMode === 'tunnel' ? 'Mengambil data realtime dari MikroTik (VPN tunnel)' : 'Mengambil data dari Google Sheets'}</p>
             </div>
           ) : fetchError ? (
             <div className="flex flex-col justify-center items-center h-full text-center gap-4">
@@ -1305,10 +1355,20 @@ function App() {
               <div>
                 <p className="font-bold text-slate-700 dark:text-slate-200">Data gagal dimuat</p>
                 <p className="font-medium text-slate-500 dark:text-slate-400 max-w-sm text-sm mt-1">{fetchError}</p>
+                {dataMode === 'tunnel' && (
+                  <p className="font-medium text-slate-400 dark:text-slate-500 max-w-sm text-xs mt-2">
+                    Periksa koneksi tunnel VPN ke MikroTik, atau beralih ke sumber data Spreadsheet.
+                  </p>
+                )}
               </div>
-              <button onClick={() => setReloadKey(k => k + 1)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-sm transition-colors">
-                <RefreshCw size={16} /> Coba lagi
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button onClick={() => setReloadKey(k => k + 1)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-sm transition-colors">
+                  <RefreshCw size={16} /> Coba lagi
+                </button>
+                <button onClick={() => setDataMode(dataMode === 'tunnel' ? 'sheets' : 'tunnel')} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-sm transition-colors">
+                  {dataMode === 'tunnel' ? 'Pakai Spreadsheet' : 'Coba Realtime'}
+                </button>
+              </div>
             </div>
           ) : (
             <>
@@ -1339,6 +1399,9 @@ function App() {
                       </div>
                     ))}
                   </div>
+
+                  {/* ===== PEMANTAUAN JARINGAN (khusus mode realtime) ===== */}
+                  {dataMode === 'tunnel' && <RealtimeMonitor darkMode={darkMode} />}
 
                   {dataHotspot.length === 0 ? (
                     <EmptyState Icon={BarChart2} title="Belum ada data hotspot untuk ditampilkan." hint="Tekan tombol muat ulang di header setelah sheet terisi." />
