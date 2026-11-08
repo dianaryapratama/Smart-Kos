@@ -15,7 +15,7 @@ import {
   matchFace, parseDescriptor, DESCRIPTOR_LENGTH
 } from './faceAuth';
 import Assistant from './Assistant';
-import { APP_NAME, ABOUT_TEXT, STACK, FAQS, ADMIN_CSV_URL, REALTIME_POLL_MS, DEFAULT_DATA_MODE, DATA_MODE_STORAGE_KEY, WEBFIG_URL, ADSENSE_CLIENT } from './config';
+import { APP_NAME, ABOUT_TEXT, STACK, FAQS, ADMIN_CSV_URL, REALTIME_POLL_MS, DEFAULT_DATA_MODE, DATA_MODE_STORAGE_KEY, WEBFIG_URL } from './config';
 import { loadHotspotRows } from './dataSource';
 import RealtimeMonitor from './RealtimeMonitor';
 import HomePage from './landing/Home';
@@ -444,22 +444,8 @@ function App() {
     localStorage.setItem('kost50_dark', darkMode ? '1' : '0');
   }, [darkMode]);
 
-  // Muat script Google AdSense hanya pada halaman non-admin (belum login)
-  useEffect(() => {
-    const selector = `script[data-adsense-client="${ADSENSE_CLIENT}"]`;
-    const existing = document.querySelector(selector);
-    if (isLoggedIn) {
-      if (existing) existing.remove();
-      return;
-    }
-    if (existing) return;
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`;
-    script.crossOrigin = 'anonymous';
-    script.dataset.adsenseClient = ADSENSE_CLIENT;
-    document.head.appendChild(script);
-  }, [isLoggedIn]);
+  // Script Google AdSense dimuat statis dari index.html (wajib di <head>
+  // agar crawler verifikasi AdSense melihatnya di HTML awal, bukan hasil JS).
 
   useEffect(() => {
     if (!isLoggedIn) return;

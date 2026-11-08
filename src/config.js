@@ -2,9 +2,6 @@ export const APP_NAME = 'Smart Kost';
 export const AUTHOR_NAME = 'Dian Arya Pratama';
 export const COPYRIGHT_YEAR = 2026;
 
-// Google AdSense — hanya dimuat pada halaman non-admin (sebelum login)
-export const ADSENSE_CLIENT = 'ca-pub-1313683269948868';
-
 export const ABOUT_TEXT = 'Smart Kost adalah dashboard manajemen jaringan internet (WiFi hotspot) untuk kost. Aplikasi ini memantau pemakaian data tiap kamar, mengelola batas FUP per ISP, menampilkan tren pemakaian harian, serta menyediakan akses aman melalui kata sandi dan login wajah. Dilengkapi Asisten AI berbasis Groq untuk menanya data dan analitik secara langsung.';
 
 export const STACK = [
