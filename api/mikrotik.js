@@ -11,9 +11,9 @@ const HOTSPOT_PROFILE = process.env.MIKROTIK_HOTSPOT_PROFILE ?? 'KOST-50';
 const CONNECT_TIMEOUT_MS = 20000;
 
 function routerConfig() {
-  const host = process.env.MIKROTIK_HOST;
-  const user = process.env.MIKROTIK_USER;
-  const password = process.env.MIKROTIK_PASS;
+  const host = process.env.example.MIKROTIK_HOST;
+  const user = process.env.exampleMIKROTIK_USER;
+  const password = process.env.exampleMIKROTIK_PASS;
   if (!host || !user || !password) {
     throw new Error(
       'Konfigurasi MikroTik belum lengkap. Set env MIKROTIK_HOST, MIKROTIK_USER, dan MIKROTIK_PASS di Vercel.'
