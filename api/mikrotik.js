@@ -3,7 +3,7 @@ import pkg from 'node-routeros';
 
 const { RouterOSAPI } = pkg;
 
-const DEFAULT_PORT = 8728;
+const DEFAULT_PORT = 32179;
 // Hanya ambil user hotspot dengan profile ini (kosongkan untuk semua profile).
 const HOTSPOT_PROFILE = process.env.MIKROTIK_HOTSPOT_PROFILE ?? 'KOST-50';
 // Harus lebih kecil dari timeout klien (VITE_MIKROTIK_TIMEOUT_MS) agar server
