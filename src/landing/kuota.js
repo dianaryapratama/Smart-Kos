@@ -34,6 +34,19 @@ export function parseDateTs(str) {
   return isNaN(t) ? 0 : t;
 }
 
+export function latestDataDate(rows = []) {
+  let latest = 0;
+  for (const row of rows) {
+    const raw = row ? (row.Tanggal ?? row.Date ?? '') : '';
+    const ts = parseDateTs(raw);
+    if (ts > latest) latest = ts;
+  }
+  if (!latest) return '';
+  const d = new Date(latest);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
 // Ambil baris mentah { username, mb, ts }. 'Total (MB)' bersifat KUMULATIF dari MikroTik.
 export function parseCsvRows(data) {
   const out = [];

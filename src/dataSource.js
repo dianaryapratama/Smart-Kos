@@ -51,6 +51,7 @@ function usersToLiveRows(users) {
     Tanggal: label,
     Username: u.name,
     'Total (MB)': bytesToMB(u.totalBytes),
+    Keterangan: u.profile || '',
     __live: true
   }));
 }
@@ -62,10 +63,10 @@ export async function loadFromSheets() {
 }
 
 // Ambil data realtime dari router via tunnel (mode 'tunnel')
-export async function loadFromTunnel() {
+export async function loadFromTunnel({ timeout, retries } = {}) {
   let res;
   try {
-    res = await fetchRouterUsers();
+    res = await fetchRouterUsers({ timeout, retries });
   } catch (err) {
     throw new Error(
       err && err.message ? err.message : 'Tunnel MikroTik tidak dapat dihubungi.',
@@ -88,4 +89,25 @@ export async function loadFromTunnel() {
 // Loader utama: pilih mode (default dari config)
 export function loadHotspotRows(mode = DEFAULT_DATA_MODE) {
   return mode === 'sheets' ? loadFromSheets() : loadFromTunnel();
+}
+
+export async function loadHotspotRowsWithFallback({ mode = DEFAULT_DATA_MODE, timeout, retries } = {}) {
+  if (mode === 'sheets') return loadFromSheets();
+
+  let tunnelError;
+  try {
+    const result = await loadFromTunnel({ timeout, retries });
+    if (Array.isArray(result.rows) && result.rows.length > 0) return result;
+    tunnelError = 'Data realtime MikroTik kosong.';
+  } catch (err) {
+    tunnelError = err && err.message ? err.message : 'VPN MikroTik tidak terhubung.';
+  }
+
+  try {
+    const sheets = await loadFromSheets();
+    return { ...sheets, fallbackReason: tunnelError };
+  } catch (err) {
+    const sheetError = err && err.message ? err.message : 'Google Sheets tidak dapat dibaca.';
+    throw new Error(`${tunnelError} Google Sheets juga gagal: ${sheetError}`, { cause: err });
+  }
 }

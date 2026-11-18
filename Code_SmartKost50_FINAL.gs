@@ -20,6 +20,15 @@ const FACE_DESCRIPTOR_HEADER = 'facedescriptor';
 const RESET_TARGET_SHEETS = ['Hotspot', 'FUP'];
 const PROTECTED_SHEET_NAMES = ['admin'];
 
+function ensureHotspotKeterangan_(sheet) {
+  var lastCol = Math.max(1, sheet.getLastColumn());
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var exists = headers.some(function (header) {
+    return String(header || '').trim().toLowerCase() === 'keterangan';
+  });
+  if (!exists) sheet.getRange(1, lastCol + 1).setValue('Keterangan');
+}
+
 // Fungsi bantuan untuk membaca Sheet FUP
 function getSheet_() {
   return SpreadsheetApp.openById(SHEET_ID).getSheetByName(SHEET_NAME);
@@ -298,6 +307,7 @@ function doGet(e) {
   // --- JALUR 1: DATA DARI MIKROTIK ---
   if (e && e.parameter && e.parameter.hotspotData) {
     var sheet = SpreadsheetApp.openById(SHEET_ID).getSheetByName(HOTSPOT_SHEET_NAME);
+    ensureHotspotKeterangan_(sheet);
     var timestamp = new Date();
 
     // FITUR AUTO-CLEAN: Hapus Data Tiap Tanggal 1
@@ -311,29 +321,30 @@ function doGet(e) {
 
     var rawData = e.parameter.hotspotData;
     var records = rawData.split(',');
+    var saved = 0;
 
     for (var i = 0; i < records.length; i++) {
       var details = records[i].split('|');
-      if (details.length === 3) {
+      if (details.length >= 3) {
         var user = details[0];
         var uploadBytes = parseFloat(details[1]) || 0;
         var downloadBytes = parseFloat(details[2]) || 0;
+        var profile = details.length > 3 ? details[3] : '';
 
         var uploadMB = (uploadBytes / 1048576).toFixed(2);
         var downloadMB = (downloadBytes / 1048576).toFixed(2);
         var totalMB = ((uploadBytes + downloadBytes) / 1048576).toFixed(2);
 
-        // Catatan: urutan ini sama seperti script aslimu (download ditulis lebih dulu),
-        // sedangkan header sheet menulis kolom C sebagai "Upload (MB)".
-        // Dashboard hanya memakai kolom "Total (MB)", jadi tidak terpengaruh.
         if (totalMB >= 0) {
-           sheet.appendRow([timestamp, user, downloadMB, uploadMB, totalMB]);
+           sheet.appendRow([timestamp, user, uploadMB, downloadMB, totalMB, profile]);
+           saved += 1;
         }
       }
     }
     return ContentService.createTextOutput(JSON.stringify({
       status: "success",
-      message: "Data direkam. (Sistem Auto-Clean Aktif)"
+      saved: saved,
+      message: "Data direkam: " + saved + " baris. (Sistem Auto-Clean Aktif)"
     })).setMimeType(ContentService.MimeType.JSON);
   }
 

@@ -24,7 +24,30 @@ import CekKuotaPage from './landing/CekKuota';
 import ChatPage from './chat/ChatPage';
 import ChatWidget from './chat/ChatWidget';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#94a3b8'];
+const PROFILE_STYLES = {
+  'KOST-50': {
+    label: 'KOST-50',
+    dot: 'bg-emerald-500',
+    badge: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
+    chart: '#10b981'
+  },
+  'KOST-50-FUP 1': {
+    label: 'FUP 1',
+    dot: 'bg-amber-500',
+    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300',
+    chart: '#f59e0b'
+  },
+  'KOST-50-FUP 2': {
+    label: 'FUP 2',
+    dot: 'bg-rose-500',
+    badge: 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300',
+    chart: '#f43f5e'
+  }
+};
+
+function profileStyle(keterangan) {
+  return PROFILE_STYLES[String(keterangan || '').trim()] || PROFILE_STYLES['KOST-50'];
+}
 
 const softBox = 'bg-white dark:bg-slate-900 rounded-xl border border-slate-200/70 dark:border-slate-800';
 
@@ -767,7 +790,8 @@ function App() {
       (groups[row.Username] ||= []).push({
         Tanggal: row.Tanggal,
         ts: parseTanggal(row.Tanggal),
-        totalVal: isNaN(total) ? 0 : total
+        totalVal: isNaN(total) ? 0 : total,
+        keterangan: row.Keterangan || row.Profile || row.profile || ''
       });
     });
 
@@ -782,6 +806,7 @@ function App() {
         if (pure < 0) pure = rec.totalVal; // kuota di-reset (awal bulan)
         daily.push({
           Tanggal: rec.Tanggal, ts: rec.ts, Username: user,
+          Keterangan: rec.keterangan,
           DailyMB: parseFloat(pure.toFixed(2)),
           CumulativeMB: rec.totalVal,
           IsBaseline: i === 0
@@ -789,7 +814,8 @@ function App() {
         const key = rec.Tanggal;
         (trendByDate[key] ||= { Tanggal: key, ts: rec.ts, harian: 0 }).harian += pure;
       });
-      latest[user] = records[records.length - 1].totalVal; // data terbaru, bukan baris terakhir di sheet
+      const newest = records[records.length - 1];
+      latest[user] = { totalMB: newest.totalVal, keterangan: newest.keterangan }; // data terbaru, bukan baris terakhir di sheet
     });
 
     const sortedTrend = Object.values(trendByDate).sort((a, b) => a.ts - b.ts);
@@ -800,11 +826,11 @@ function App() {
     }));
 
     const bar = Object.entries(latest)
-      .map(([name, v]) => ({ name, totalMB: parseFloat(v.toFixed(2)) }))
+      .map(([name, v]) => ({ name, totalMB: parseFloat(v.totalMB.toFixed(2)), keterangan: v.keterangan }))
       .sort((a, b) => b.totalMB - a.totalMB);
 
     // Semua kamar tampil penuh di donut & leaderboard (tanpa penggabungan/pembatasan)
-    const donut = bar.map(b => ({ name: b.name, value: b.totalMB }));
+    const donut = bar.map(b => ({ name: b.name, value: b.totalMB, keterangan: b.keterangan }));
 
     daily.sort((a, b) => b.ts - a.ts || a.Username.localeCompare(b.Username));
     return { aiDailyData: daily, networkTrendData: trend, donutChartData: donut, chartDataBar: bar };
@@ -1437,7 +1463,7 @@ function App() {
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart>
                                 <Pie data={donutChartData} cx="50%" cy="50%" innerRadius={56} outerRadius={80} paddingAngle={donutChartData.length > 12 ? 1 : 3} dataKey="value" stroke="none">
-                                  {donutChartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                                  {donutChartData.map((d, i) => <Cell key={i} fill={profileStyle(d.keterangan).chart} />)}
                                 </Pie>
                                 <RechartsTooltip formatter={(v, n) => [formatDataSize(v), n]} contentStyle={tooltipStyle(darkMode)} />
                               </PieChart>
@@ -1448,15 +1474,22 @@ function App() {
                             </div>
                           </div>
                           <ul className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-700 space-y-1.5 flex-1 min-h-0 overflow-y-auto pr-1">
-                            {donutChartData.map((d, i) => (
+                            {donutChartData.map((d) => (
                               <li key={d.name} className="flex items-center gap-2 text-xs">
-                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></span>
+                                <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: profileStyle(d.keterangan).chart }}></span>
                                 <span className="truncate flex-1 text-slate-600 dark:text-slate-300" title={d.name}>{d.name}</span>
                                 <span className="tabular-nums text-slate-400 font-semibold w-10 text-right">{formatPct((d.value / donutTotalMB) * 100)}</span>
                                 <span className="tabular-nums font-bold text-slate-700 dark:text-slate-200 w-20 text-right">{formatDataSize(d.value)}</span>
                               </li>
                             ))}
                           </ul>
+                          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap gap-3 text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                            {Object.values(PROFILE_STYLES).map((pf) => (
+                              <span key={pf.label} className="inline-flex items-center gap-1.5">
+                                <span className={`h-2 w-2 rounded-full ${pf.dot}`}></span>{pf.label}
+                              </span>
+                            ))}
+                          </div>
                         </div>
                       </div>
 
@@ -1478,6 +1511,7 @@ function App() {
                                   <YAxis type="category" dataKey="name" width={96} tick={{ ...axisTick, fontSize: 11 }} axisLine={false} tickLine={false} interval={0} />
                                   <RechartsTooltip cursor={{ fill: darkMode ? '#1e293b22' : '#f1f5f9' }} formatter={(v, n) => [formatDataSize(v), n]} labelFormatter={(l) => `Kamar ${l}`} contentStyle={tooltipStyle(darkMode)} />
                                   <Bar dataKey="totalMB" name="Total Data" fill="#3b82f6" radius={[0, 6, 6, 0]} barSize={16} background={{ fill: darkMode ? '#1e293b' : '#f1f5f9', radius: [0, 6, 6, 0] }}>
+                                    {chartDataBar.map((d, i) => <Cell key={i} fill={profileStyle(d.keterangan).chart} />)}
                                     <LabelList content={BarValueLabel} />
                                   </Bar>
                                 </BarChart>
@@ -1590,7 +1624,7 @@ function App() {
                               <td className="py-3 px-4 md:px-6 text-sm text-slate-600 dark:text-slate-400 print:text-black tabular-nums">{row.Tanggal}</td>
                               <td className="py-3 px-4 md:px-6 font-bold print:text-black">
                                 <span className="inline-flex items-center gap-2">
-                                  <span className="h-6 w-6 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 text-[10px] font-bold flex items-center justify-center uppercase print:hidden">{row.Username.charAt(0)}</span>
+                                  <span className="h-6 w-6 rounded-lg text-white text-[10px] font-bold flex items-center justify-center uppercase print:hidden" style={{ backgroundColor: profileStyle(row.Keterangan).chart }}>{row.Username.charAt(0)}</span>
                                   {row.Username}
                                 </span>
                               </td>
@@ -1814,19 +1848,29 @@ function App() {
                         <tr className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-slate-400 text-[11px] uppercase tracking-wider">
                           <th className="py-3.5 px-4 md:px-6 font-bold bg-white dark:bg-slate-900">Tanggal</th>
                           <th className="py-3.5 px-4 md:px-6 font-bold bg-white dark:bg-slate-900">Username</th>
+                          <th className="py-3.5 px-4 md:px-6 font-bold bg-white dark:bg-slate-900">Keterangan</th>
                           <th className="py-3.5 px-4 md:px-6 font-bold text-right bg-white dark:bg-slate-900" title="Total kumulatif pemakaian per record">Total Pemakaian</th>
                         </tr>
                       </thead>
                       <tbody>
                         {dataHotspot.length === 0 ? (
-                          <tr><td colSpan={3} className="py-12 text-center text-slate-500">Tidak ada data.</td></tr>
-                        ) : dataHotspot.map((row, i) => (
-                          <tr key={i} className="border-b border-slate-50 dark:border-slate-700/50 odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-800/40 dark:even:bg-slate-800/20 hover:bg-emerald-50/60 dark:hover:bg-slate-700/40 transition-colors">
-                            <td className="py-3 px-4 md:px-6 text-slate-500 dark:text-slate-400 text-sm tabular-nums">{row.Tanggal}</td>
-                            <td className="py-3 px-4 md:px-6 font-bold">{row.Username}</td>
-                            <td className="py-3 px-4 md:px-6 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatDataSize(row['Total (MB)'])}</td>
-                          </tr>
-                        ))}
+                          <tr><td colSpan={4} className="py-12 text-center text-slate-500">Tidak ada data.</td></tr>
+                        ) : dataHotspot.map((row, i) => {
+                          const pf = profileStyle(row.Keterangan);
+                          return (
+                            <tr key={i} className="border-b border-slate-50 dark:border-slate-700/50 odd:bg-white even:bg-slate-50/60 dark:odd:bg-slate-800/40 dark:even:bg-slate-800/20 hover:bg-emerald-50/60 dark:hover:bg-slate-700/40 transition-colors">
+                              <td className="py-3 px-4 md:px-6 text-slate-500 dark:text-slate-400 text-sm tabular-nums">{row.Tanggal}</td>
+                              <td className="py-3 px-4 md:px-6 font-bold">{row.Username}</td>
+                              <td className="py-3 px-4 md:px-6">
+                                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${pf.badge}`}>
+                                  <span className={`h-1.5 w-1.5 rounded-full ${pf.dot}`}></span>
+                                  {row.Keterangan || pf.label}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 md:px-6 text-right font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatDataSize(row['Total (MB)'])}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

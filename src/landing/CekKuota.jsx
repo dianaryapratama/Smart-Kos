@@ -5,8 +5,8 @@ import {
 } from 'lucide-react';
 import { Nav, Footer } from './LandingShell';
 import { KUOTA_CATEGORIES } from '../config';
-import { loadHotspotRows } from '../dataSource';
-import { mbToGB, aggregateByUser, parseCsvRows, formatDateTs } from './kuota';
+import { loadHotspotRowsWithFallback } from '../dataSource';
+import { mbToGB, aggregateByUser, parseCsvRows, formatDateTs, latestDataDate } from './kuota';
 
 const CAT_META = {
   normal: { chip: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
@@ -14,18 +14,22 @@ const CAT_META = {
   abnormal: { chip: 'bg-red-100 text-red-700', bar: 'bg-red-500', dot: 'bg-red-500' }
 };
 
+const CEK_KUOTA_TIMEOUT_MS = 8000;
+
 export default function CekKuota() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('idle'); // idle | loading | done | empty | error
   const [errorMsg, setErrorMsg] = useState('');
   const [rows, setRows] = useState([]);
+  const [sourceNote, setSourceNote] = useState(null);
 
   const runSearch = async () => {
     const q = query.trim().toLowerCase();
     if (!q) return;
     setStatus('loading');
+    setSourceNote(null);
     try {
-      const result = await loadHotspotRows();
+      const result = await loadHotspotRowsWithFallback({ timeout: CEK_KUOTA_TIMEOUT_MS, retries: 0 });
       const parsed = parseCsvRows(result.rows);
       if (!parsed.length) {
         setErrorMsg('Data kuota masih kosong atau format tidak dikenali.');
@@ -35,6 +39,15 @@ export default function CekKuota() {
       setRows(parsed);
       setStatus('done');
       setErrorMsg('');
+      const dateLabel = latestDataDate(result.rows) ||
+        (result.syncedAt ? new Date(result.syncedAt).toLocaleDateString('id-ID') : 'tanggal tidak tersedia');
+      setSourceNote({
+        fallback: Boolean(result.fallbackReason),
+        reason: result.fallbackReason || '',
+        text: result.source === 'sheets'
+          ? `Data diambil dari Google Sheets per ${dateLabel}.`
+          : `Data realtime MikroTik per ${dateLabel}.`
+      });
     } catch (err) {
       setErrorMsg(err && err.message ? err.message : 'Gagal memuat data kuota.');
       setStatus('error');
@@ -100,6 +113,22 @@ export default function CekKuota() {
       </section>
 
       <section className="mx-auto max-w-[760px] px-5 py-12 lg:px-0">
+        {sourceNote && status === 'done' && (
+          <div className={`card mb-6 flex items-start gap-3 p-4 ${sourceNote.fallback ? 'border-amber-200 bg-amber-50' : ''}`}>
+            <AlertCircle className={`mt-0.5 h-5 w-5 shrink-0 ${sourceNote.fallback ? 'text-amber-500' : 'text-brand-blue'}`} />
+            <div>
+              <p className={`text-[13px] font-bold ${sourceNote.fallback ? 'text-amber-800' : 'text-brand-navy'}`}>
+                {sourceNote.text}
+              </p>
+              {sourceNote.fallback && (
+                <p className="mt-1 text-[12px] font-semibold text-amber-700">
+                  {sourceNote.reason} Data ditampilkan dari cadangan Google Sheets.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {status === 'error' && (
           <div className="card flex items-start gap-4 border-red-200 bg-red-50 p-6">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-500" />

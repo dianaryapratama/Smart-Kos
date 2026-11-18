@@ -27,22 +27,23 @@ async function once(url, options, timeout) {
 }
 
 // Coba ulang sekali saat timeout / gagal koneksi (tunnel bisa lambat sesaat)
-async function request(url, options = {}, timeout = DEFAULT_TIMEOUT) {
+async function request(url, options = {}, timeout = DEFAULT_TIMEOUT, retries = MAX_RETRIES) {
   let lastErr;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
       return await once(url, options, timeout);
     } catch (err) {
       lastErr = err;
       const retriable = /timeout|Tidak dapat menghubungi/i.test(err && err.message ? err.message : '');
-      if (!retriable || attempt === MAX_RETRIES) break;
+      if (!retriable || attempt === retries) break;
       await new Promise((resolve) => setTimeout(resolve, 800));
     }
   }
   throw lastErr;
 }
 
-export const fetchRouterUsers = () => request(`${BASE}?action=users`, { cache: 'no-store' });
+export const fetchRouterUsers = ({ timeout, retries } = {}) =>
+  request(`${BASE}?action=users`, { cache: 'no-store' }, timeout, retries);
 
 export const fetchRouterStats = () => request(`${BASE}?action=stats`, { cache: 'no-store' });
 

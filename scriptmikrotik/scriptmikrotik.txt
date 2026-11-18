@@ -1,0 +1,39 @@
+:local allData "";
+
+# Mengambil data dari 3 profil Hotspot
+:foreach profileName in={"KOST-50";"KOST-50-FUP 1";"KOST-50-FUP 2"} do={
+
+    :foreach i in=[/ip hotspot user find where profile=$profileName] do={
+
+        :local uName [/ip hotspot user get $i name];
+        :local bIn [/ip hotspot user get $i bytes-in];
+        :local bOut [/ip hotspot user get $i bytes-out];
+
+        # Mencegah error jika pemakaian masih kosong
+        :if ([:len $bIn] = 0) do={:set bIn 0};
+        :if ([:len $bOut] = 0) do={:set bOut 0};
+
+        :local uProfile $profileName;
+        :if ($uProfile = "KOST-50-FUP 1") do={:set uProfile "KOST-50-FUP%201"};
+        :if ($uProfile = "KOST-50-FUP 2") do={:set uProfile "KOST-50-FUP%202"};
+
+        # Format pengiriman: nama|upload|download|profile
+        :local record "$uName|$bIn|$bOut|$uProfile";
+
+        :if ([:len $allData] = 0) do={
+            :set allData $record;
+        } else={
+            :set allData "$allData,$record";
+        }
+    }
+}
+
+# Mengirim ke Google Webhook
+:local url "https://script.google.com/macros/s/AKfycbyqPrFZKU2U6ZmyYf29aaG6Q6Sr6kkUXd1dKqI8xkzhK2xy3wwOtAmXWNm9YOaCKleDqQ/exec?hotspotData=$allData";
+
+do={
+    /tool fetch url=$url mode=https keep-result=no;
+    :log info "Data Hotspot berhasil dikirim ke Google Webhook";
+} on-error={
+    :log error "Gagal mengirim data Hotspot ke Google Webhook";
+}

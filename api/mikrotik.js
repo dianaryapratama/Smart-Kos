@@ -4,8 +4,25 @@ import pkg from 'node-routeros';
 const { RouterOSAPI } = pkg;
 
 const DEFAULT_PORT = 8728;
-// Hanya ambil user hotspot dengan profile ini (kosongkan untuk semua profile).
-const HOTSPOT_PROFILE = process.env.MIKROTIK_HOTSPOT_PROFILE ?? 'KOST-50';
+const DEFAULT_HOTSPOT_PROFILES = ['KOST-50', 'KOST-50-FUP 1', 'KOST-50-FUP 2'];
+
+function hotspotProfiles() {
+  const raw = process.env.MIKROTIK_HOTSPOT_PROFILES;
+  if (raw !== undefined && raw !== null) {
+    const list = String(raw).trim();
+    if (!list || list === '*') return [];
+    return list.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+  const legacy = process.env.MIKROTIK_HOTSPOT_PROFILE;
+  if (legacy === undefined || legacy === null) return DEFAULT_HOTSPOT_PROFILES;
+  if (!String(legacy).trim()) return [];
+  return Array.from(new Set([
+    ...DEFAULT_HOTSPOT_PROFILES,
+    ...String(legacy).split(',').map((item) => item.trim()).filter(Boolean)
+  ]));
+}
+
+const HOTSPOT_PROFILES = hotspotProfiles();
 // Harus lebih kecil dari timeout klien (VITE_MIKROTIK_TIMEOUT_MS) agar server
 // selalu mengirim pesan error yang jelas sebelum browser membatalkan permintaan.
 const CONNECT_TIMEOUT_MS = 20000;
@@ -86,17 +103,22 @@ const sameSecret = (a, b) => {
 };
 
 async function readUsage(conn) {
-  const usersQuery = HOTSPOT_PROFILE ? ['?profile=' + HOTSPOT_PROFILE] : [];
   const [users, active] = await Promise.all([
-    conn.write('/ip/hotspot/user/print', usersQuery),
+    conn.write('/ip/hotspot/user/print'),
     conn.write('/ip/hotspot/active/print')
   ]);
   const activeByUser = new Map(active.map((a) => [a.user, a]));
   const data = users
+    .filter((u) => !HOTSPOT_PROFILES.length || HOTSPOT_PROFILES.includes(String(u.profile || '').trim()))
     .map((u) => mapUser(u, activeByUser))
     .sort((a, b) => b.totalBytes - a.totalBytes);
   const activeCount = data.filter((u) => u.online).length;
-  return { users: data, profile: HOTSPOT_PROFILE, activeCount, syncedAt: new Date().toISOString() };
+  return {
+    users: data,
+    profiles: HOTSPOT_PROFILES,
+    activeCount,
+    syncedAt: new Date().toISOString()
+  };
 }
 
 // Ambil seluruh metrik monitoring jaringan (untuk mode realtime only).
